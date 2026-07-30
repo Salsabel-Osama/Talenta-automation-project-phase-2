@@ -1,5 +1,6 @@
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import FastMCP, Context
+import asyncio
+from db import get_connection
 
 
 # Capability negotiation & Transports
@@ -9,7 +10,7 @@ mcp = FastMCP("TalentaRecruitmentServer")
 # Resources
 @mcp.resource("talenta://policies/hiring")
 def get_hiring_policies() -> str:
-    """ Talenta's official hiring policies and constraints """
+    """ Talenta's official hiring policies and constraints"""
     
     return """
     TALENTA OFFICIAL HIRING POLICIES & EVALUATION RULES:
@@ -47,9 +48,79 @@ async def simulate_hr_login(ctx: Context) -> str:
 @mcp.tool()
 def approve_final_hire(application_id: int) -> str:
     """Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only"""
+
     if not hr_logged_in:
         return "Error: This tool requires an active HR Manager session"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT application_id, status FROM Applications WHERE application_id = ?", (application_id,))
+    row = cursor.fetchone()
+
+    if row is None:
+        conn.close()
+        return f"Error: Application {application_id} does not exist."
+
+    cursor.execute(
+        "UPDATE Applications SET status = ? WHERE application_id = ?",
+        ("ACCEPTED", application_id)
+    )
+    conn.commit()
+    conn.close()
+
     return f"Application {application_id} has been officially finalized as HIRED"
+
+
+# Progress tracking
+@mcp.tool()
+async def batch_match_candidates(job_id: int, ctx: Context) -> str:
+    """Matches all pending applicants against a job's required skills, reporting progress as it goes"""
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT skill FROM JobSkills WHERE job_id = ?", (job_id,))
+    required_skills = {r["skill"] for r in cursor.fetchall()}
+
+    if not required_skills:
+        conn.close()
+        return f"Error: No skills found for job_id {job_id}. Check the job exists."
+
+    cursor.execute(
+        "SELECT application_id, candidate_id FROM Applications WHERE job_id = ? AND status = 'PENDING'",
+        (job_id,)
+    )
+    pending_applications = cursor.fetchall()
+    total = len(pending_applications)
+
+    if total == 0:
+        conn.close()
+        return f"No pending applications found for job_id {job_id}."
+
+    results = []
+
+    for i, app in enumerate(pending_applications):
+        cursor.execute(
+            "SELECT skill FROM CandidateSkills WHERE candidate_id = ?",
+            (app["candidate_id"],)
+        )
+        candidate_skills = {r["skill"] for r in cursor.fetchall()}
+
+        overlap = candidate_skills & required_skills
+        match_percentage = (len(overlap) / len(required_skills)) * 100
+
+        results.append(f"App {app['application_id']}: {match_percentage:.1f}% match")
+
+        await ctx.session.send_progress(
+            progress=((i + 1) / total) * 100,
+            total=100,
+            message=f"Processed application {i + 1} of {total}"
+        )
+        await asyncio.sleep(0.3)
+
+    conn.close()
+    return "Batch matching complete for job " + str(job_id) + ":\n" + "\n".join(results)
 
 
 # run server
