@@ -164,5 +164,5 @@ A candidate can apply for multiple jobs, and each job can have multiple candidat
 
 The following diagram represents the database structure and relationships.
 
-![Talenta Recruitment ERD](db/ERD%20Diagram.png)
+![Talenta Recruitment ERD](db/ERD.png)
 ---
