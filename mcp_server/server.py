@@ -184,6 +184,69 @@ async def analyze_recruiter_note(application_id: int, ctx: Context) -> str:
     return f"Application {application_id} note: \"{note}\" → Sentiment: {sentiment}"
 
 
+# Elicitation
+@mcp.tool()
+async def approve_final_hire_with_confirmation(
+    application_id: int = Field(
+        ...,
+        gt=0,
+        description="Positive integer ID of the application to finalize. Must reference an existing application."
+    ),
+    ctx: Context = None
+) -> str:
+    """Finalizes hiring for a candidate, pausing mid-call to request explicit human confirmation."""
+
+    if not hr_logged_in:
+        return "Error: This tool requires an active HR Manager session"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT application_id, status FROM Applications WHERE application_id = ?",
+        (application_id,)
+    )
+    row = cursor.fetchone()
+
+    if row is None:
+        conn.close()
+        return f"Error: Application {application_id} does not exist."
+
+    current_status = row["status"]
+    if current_status == "REJECTED":
+        conn.close()
+        return f"Error: Application {application_id} was already REJECTED and cannot be hired."
+    if current_status == "ACCEPTED":
+        conn.close()
+        return f"Application {application_id} is already ACCEPTED. No changes made."
+
+    result = await ctx.session.elicit(
+        message=f"Confirm hiring for application {application_id}? This action is irreversible.",
+        requestedSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Explicit HR confirmation to proceed with hiring"
+                }
+            },
+            "required": ["confirm"]
+        }
+    )
+
+    if result.action != "accept" or not result.content.get("confirm"):
+        conn.close()
+        return f"Hiring for application {application_id} was not confirmed. No changes made."
+
+    cursor.execute(
+        "UPDATE Applications SET status = ? WHERE application_id = ?",
+        ("ACCEPTED", application_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return f"Application {application_id} has been officially finalized as HIRED (confirmed by HR)."
+
+
 # run server
 if __name__ == "__main__":
     print("Starting Talenta MCP Server on stdio transport...")
