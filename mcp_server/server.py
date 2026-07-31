@@ -1,6 +1,7 @@
 from mcp.server.fastmcp import FastMCP, Context
 import asyncio
 from db import get_connection
+from mcp.types import SamplingMessage, TextContent
 
 
 # Capability negotiation & Transports
@@ -121,6 +122,46 @@ async def batch_match_candidates(job_id: int, ctx: Context) -> str:
 
     conn.close()
     return "Batch matching complete for job " + str(job_id) + ":\n" + "\n".join(results)
+
+
+# Sampling
+@mcp.tool()
+async def analyze_recruiter_note(application_id: int, ctx: Context) -> str:
+    """Analyzes the sentiment of a recruiter's note for a given application using the client's model."""
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT recruiter_notes FROM Applications WHERE application_id = ?",
+        (application_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if row is None:
+        return f"Error: Application {application_id} does not exist."
+
+    note = row["recruiter_notes"]
+    if not note:
+        return f"Application {application_id} has no recruiter notes to analyze."
+
+    response = await ctx.session.create_message(
+        messages=[
+            SamplingMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text=f"Classify the sentiment of this recruiter note as exactly one word "
+                         f"(POSITIVE, NEGATIVE, or NEUTRAL): \"{note}\""
+                )
+            )
+        ],
+        max_tokens=10
+    )
+
+    sentiment = response.content.text.strip()
+    return f"Application {application_id} note: \"{note}\" → Sentiment: {sentiment}"
 
 
 # run server
