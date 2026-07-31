@@ -247,6 +247,51 @@ async def approve_final_hire_with_confirmation(
     return f"Application {application_id} has been officially finalized as HIRED (confirmed by HR)."
 
 
+# Prompts
+@mcp.prompt()
+def draft_interview_invite(candidate_name: str, job_title: str, interview_date: str) -> str:
+    """A prompt template for generating an interview invitation email."""
+    
+    return f"""
+    Please draft a professional and welcoming interview invitation email for a candidate named '{candidate_name}'.
+    They have been shortlisted for the '{job_title}' position at Talenta.
+    
+    Include the following details:
+    1. Congratulate them on passing the initial screening.
+    2. Propose an interview scheduled for {interview_date}.
+    3. Ask them to confirm their availability or suggest alternative times.
+    4. Mention that the meeting link will be shared upon confirmation.
+    5. Maintain a warm and professional tone.
+    """
+
+
+@mcp.prompt()
+def draft_rejection_email(candidate_name: str, job_title: str) -> str:
+    """Reusable starting point for drafting a polite rejection email to a candidate."""
+    return (
+        f"Draft a professional, respectful rejection email to {candidate_name} "
+        f"regarding the {job_title} position at Talenta Recruitment. "
+        f"Thank them for their time, keep the tone warm and encouraging, "
+        f"and invite them to apply for future roles that match their skills."
+    )
+
+
+@mcp.prompt()
+def draft_job_offer(candidate_name: str, job_title: str, salary: str) -> str:
+    """A prompt template for generating a job offer email."""
+    
+    return f"""
+    Please draft a formal job offer email for '{candidate_name}' who has been selected for the '{job_title}' role at Talenta.
+    
+    Include the following key points:
+    1. Express our excitement to welcome them to the team.
+    2. State the official job title ({job_title}) and the starting salary ({salary}).
+    3. Mention that an official contract with full benefits and terms is attached (assume an attachment exists).
+    4. Ask them to review the offer and reply by the end of the week.
+    5. Keep the tone enthusiastic but formal.
+    """
+
+
 # run server
 if __name__ == "__main__":
     print("Starting Talenta MCP Server on stdio transport...")
