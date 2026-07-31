@@ -1,75 +1,44 @@
-CREATE DATABASE TalentaRecruitmentDB;
-
-USE TalentaRecruitmentDB;
-
-CREATE TABLE Candidates (
-    candidate_id INT PRIMARY KEY IDENTITY(1,1),
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    phone VARCHAR(20),
-    location VARCHAR(100),
-    experience_years INT DEFAULT 0,
-    education VARCHAR(100)
+CREATE TABLE IF NOT EXISTS Candidates (
+    candidate_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    phone TEXT,
+    location TEXT,
+    experience_years INTEGER DEFAULT 0,
+    education TEXT
 );
 
-CREATE TABLE CandidateSkills (
-    id INT PRIMARY KEY IDENTITY(1,1),
-    candidate_id INT NOT NULL,
-    skill NVARCHAR(100) NOT NULL,
-
-    CONSTRAINT FK_CandidateSkills_Candidates
-    FOREIGN KEY (candidate_id)
-    REFERENCES Candidates(candidate_id)
-    ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS CandidateSkills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    skill TEXT NOT NULL,
+    FOREIGN KEY (candidate_id) REFERENCES Candidates(candidate_id) ON DELETE CASCADE
 );
 
-CREATE TABLE Jobs (
-    job_id INT PRIMARY KEY IDENTITY(1,1),
-    title NVARCHAR(100) NOT NULL,
-    department NVARCHAR(100),
-    required_degree NVARCHAR(100),
-    min_experience INT DEFAULT 0,
-    status NVARCHAR(20) DEFAULT 'OPEN'
+CREATE TABLE IF NOT EXISTS Jobs (
+    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    department TEXT,
+    required_degree TEXT,
+    min_experience INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'OPEN'
 );
 
-
-CREATE TABLE Applications (
-    application_id INT PRIMARY KEY IDENTITY(1,1),
-
-    candidate_id INT NOT NULL,
-    job_id INT NOT NULL,
-
-    status NVARCHAR(50) DEFAULT 'PENDING',
-    match_score DECIMAL(5,2),
-    recruiter_notes NVARCHAR(MAX),
-    created_at DATETIME DEFAULT GETDATE(),
-
-
-    CONSTRAINT FK_Applications_Candidates
-    FOREIGN KEY (candidate_id)
-    REFERENCES Candidates(candidate_id)
-    ON DELETE CASCADE,
-
-
-    CONSTRAINT FK_Applications_Jobs
-    FOREIGN KEY (job_id)
-    REFERENCES Jobs(job_id)
-    ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS Applications (
+    application_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    job_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'PENDING',
+    match_score REAL,
+    recruiter_notes TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (candidate_id) REFERENCES Candidates(candidate_id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES Jobs(job_id) ON DELETE CASCADE
 );
 
-
-CREATE TABLE JobSkills (
-    id INT PRIMARY KEY IDENTITY(1,1),
-
-    job_id INT NOT NULL,
-    skill NVARCHAR(100) NOT NULL,
-
-
-    CONSTRAINT FK_JobSkills_Jobs
-    FOREIGN KEY (job_id)
-    REFERENCES Jobs(job_id)
-    ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS JobSkills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    skill TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES Jobs(job_id) ON DELETE CASCADE
 );
-
-
-
