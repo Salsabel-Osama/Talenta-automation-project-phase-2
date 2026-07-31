@@ -2,6 +2,7 @@ from mcp.server.fastmcp import FastMCP, Context
 import asyncio
 from db import get_connection
 from mcp.types import SamplingMessage, TextContent
+from pydantic import Field
 
 
 # Capability negotiation & Transports
@@ -47,8 +48,14 @@ async def simulate_hr_login(ctx: Context) -> str:
 
 
 @mcp.tool()
-def approve_final_hire(application_id: int) -> str:
-    """Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only"""
+def approve_final_hire(
+    application_id: int = Field(
+        ...,
+        gt=0,
+        description="Positive integer ID of the application to finalize. Must reference an existing application."
+    )
+) -> str:
+    """Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only."""
 
     if not hr_logged_in:
         return "Error: This tool requires an active HR Manager session"
@@ -56,12 +63,25 @@ def approve_final_hire(application_id: int) -> str:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT application_id, status FROM Applications WHERE application_id = ?", (application_id,))
+    cursor.execute(
+        "SELECT application_id, status FROM Applications WHERE application_id = ?",
+        (application_id,)
+    )
     row = cursor.fetchone()
 
     if row is None:
         conn.close()
         return f"Error: Application {application_id} does not exist."
+
+    current_status = row["status"]
+
+    if current_status == "REJECTED":
+        conn.close()
+        return f"Error: Application {application_id} was already REJECTED and cannot be hired."
+
+    if current_status == "ACCEPTED":
+        conn.close()
+        return f"Application {application_id} is already ACCEPTED. No changes made."
 
     cursor.execute(
         "UPDATE Applications SET status = ? WHERE application_id = ?",
