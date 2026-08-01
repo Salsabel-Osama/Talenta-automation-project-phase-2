@@ -65,6 +65,20 @@ async def main():
             "Excellent Candidate overall"
         )
     )
+    
+    print("=" * 50)
+    print("Search Knowledge Base (RAG)")
+    print("=" * 50)
+
+    print(
+        await agent.client.call_tool(
+            "search_knowledge_base",
+            {
+                "query": "backend Java",
+                "top_k": 2
+            }
+        )
+    )
 
     await agent.close()
 
