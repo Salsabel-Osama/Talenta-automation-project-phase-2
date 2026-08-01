@@ -69,12 +69,11 @@ The MCP Server is responsible for:
 The LLM never communicates directly with the database.
 
 ---
-
 # Database Design & ERD
 
 The Talenta Recruitment Database models the complete recruitment workflow, including candidates, their skills, available job positions, job requirements, and candidate applications.
 
-The database is implemented using **Microsoft SQL Server**.
+The database is implemented using **SQLite**, providing a lightweight and portable relational database suitable for local development and testing.
 
 ## Database Entities
 
@@ -250,3 +249,101 @@ Response
 ```
 
 Every request follows this workflow, ensuring that the AI Assistant never accesses the recruitment database directly. All interactions are validated, authorized, and executed through the MCP Server.
+
+# Technology Stack
+
+- Database: SQLite
+- Programming Language: Python
+- MCP Framework: FastMCP
+- Validation: JSON Schema
+- AI Integration: MCP Client & AI Agent
+
+---
+# Demo Scenario
+
+The following demo demonstrates all implemented MCP protocol concerns:
+
+1. The AI Agent connects to the MCP Server.
+2. Capability negotiation is completed during initialization.
+3. The AI Agent requests available recruitment tools.
+4. The recruiter logs in as HR.
+5. The server sends a `tools/list_changed` notification.
+6. The AI requests the Hiring Policy resource.
+7. The AI uses a prompt template to generate an interview invitation.
+8. A candidate approval request triggers human elicitation.
+9. The AI performs candidate matching using sampling.
+10. Batch matching reports progress updates.
+11. The recruiter receives the final validated response.
+---
+# Run Instructions
+
+## Prerequisites
+
+Before running the project, make sure you have:
+
+- Python 3.11 or later
+- SQLite
+- Required Python dependencies installed
+- Environment variables configured in a `.env` file
+
+## Setup
+
+1. Clone the repository.
+
+```bash
+git clone <https://github.com/Salsabel-Osama/Talenta-automation-project-phase-2>
+cd Talenta-automation-project-phase-2
+```
+
+2. Install the required dependencies.
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Initialize the SQLite database using the provided schema and seed files.
+
+```text
+db/schema.sql
+db/seed_data.sql
+```
+
+4. Configure the required environment variables in the `.env` file.
+
+```text
+DATABASE_PATH=talenta.db
+GROQ_API_KEY=your_api_key
+```
+
+5. Start the MCP Server.
+
+```bash
+python mcp_server/server.py
+```
+
+6. Run the AI Agent (or MCP Client) to communicate with the MCP Server.
+
+```bash
+python agent/agent.py
+```
+
+---
+
+# Transport Choice
+
+This project uses **STDIO Transport** during development because the AI Agent and the MCP Server run on the same local machine. STDIO provides a lightweight and efficient communication channel for development and testing.
+
+For production deployment, the server is designed to transition to **Streamable HTTP Transport**, allowing secure remote communication, authentication, and scalable client-server interactions.
+---
+# Tool Comparison
+
+| Tool | Type | Requires Elicitation |
+|------|------|----------------------|
+| Search Candidates | Read | No |
+| View Applications | Read | No |
+| Hiring Policy | Resource | No |
+| Candidate Matching | Read | No |
+| Approve Candidate | Write | Yes |
+| Reject Candidate | Write | Yes |
+
+Write operations require human confirmation because they modify recruitment decisions and may impact candidates.
