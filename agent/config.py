@@ -5,7 +5,7 @@ load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-MODEL_NAME = "models/gemini-2.5-pro"
+MODEL_NAME = "models/gemini-2.0-flash"
 
 TEMPERATURE = 0.2
 

@@ -261,5 +261,3 @@ SCHEMAS = {
     "candidate": CANDIDATE_SCHEMA,
     "rejection_prompt": REJECTION_PROMPT_SCHEMA
 }
-
-

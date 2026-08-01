@@ -23,7 +23,7 @@ model = genai.GenerativeModel(
 
 class RecruitmentAgent:
 
-    def _init_(self):
+    def __init__(self):
         self.model = model
         self.client = MCPClient()
 

@@ -1,9 +1,9 @@
 from validation import validate_or_raise
 from mcp.server.fastmcp import FastMCP, Context
 import asyncio
+import sys
 from db import get_connection
 from mcp.types import SamplingMessage, TextContent
-from pydantic import Field
 
 
 # Capability negotiation & Transports
@@ -14,7 +14,7 @@ mcp = FastMCP("TalentaRecruitmentServer")
 @mcp.resource("talenta://policies/hiring")
 def get_hiring_policies() -> str:
     """ Talenta's official hiring policies and constraints"""
-    
+
     return """
     TALENTA OFFICIAL HIRING POLICIES & EVALUATION RULES:
 
@@ -38,6 +38,7 @@ def get_hiring_policies() -> str:
 # Notifications
 hr_logged_in = False
 
+
 @mcp.tool()
 async def simulate_hr_login(
     username: str,
@@ -57,20 +58,20 @@ async def simulate_hr_login(
     global hr_logged_in
     hr_logged_in = True
 
-    await ctx.session.send_notification(
-        "notifications/tools/list_changed"
-    )
+    _register_restricted_tools()
+
+    await ctx.session.send_tool_list_changed()
 
     return f"{username} logged in successfully as {role}. Restricted tools are now available."
-@mcp.tool()
-def approve_final_hire(
+
+
+def _approve_final_hire_impl(
     application_id: int,
     approved_by: str,
     approval_reason: str
 ) -> str:
     """Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only."""
 
-    # JSON Schema Validation
     validate_or_raise(
         "approve_hire",
         {
@@ -80,14 +81,12 @@ def approve_final_hire(
         }
     )
 
-    # Authorization Check
     if not hr_logged_in:
         return "Error: This tool requires an active HR Manager session"
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Server-side Validation
     cursor.execute(
         "SELECT application_id, status FROM Applications WHERE application_id = ?",
         (application_id,)
@@ -132,6 +131,108 @@ def approve_final_hire(
         "finalized as HIRED."
     )
 
+
+async def _approve_final_hire_with_confirmation_impl(
+    application_id: int,
+    approved_by: str,
+    approval_reason: str,
+    ctx: Context
+) -> str:
+    """Finalizes hiring after explicit HR confirmation (elicitation)."""
+
+    validate_or_raise(
+        "approve_hire",
+        {
+            "application_id": application_id,
+            "approved_by": approved_by,
+            "approval_reason": approval_reason
+        }
+    )
+
+    if not hr_logged_in:
+        return "Error: This tool requires an active HR Manager session"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT application_id, status FROM Applications WHERE application_id = ?",
+        (application_id,)
+    )
+    row = cursor.fetchone()
+
+    if row is None:
+        conn.close()
+        return f"Error: Application {application_id} does not exist."
+
+    current_status = row["status"]
+
+    if current_status == "REJECTED":
+        conn.close()
+        return f"Error: Application {application_id} was already REJECTED and cannot be hired."
+
+    if current_status == "ACCEPTED":
+        conn.close()
+        return f"Application {application_id} is already ACCEPTED. No changes made."
+
+    result = await ctx.session.elicit(
+        message=(
+            f"HR Manager '{approved_by}' wants to approve Application {application_id}.\n\n"
+            f"Reason:\n{approval_reason}\n\n"
+            "Do you confirm this hiring decision?"
+        ),
+        requestedSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Approve or reject the hiring decision."
+                }
+            },
+            "required": ["confirm"],
+            "additionalProperties": False
+        }
+    )
+
+    if result.action != "accept" or not result.content.get("confirm"):
+        conn.close()
+        return f"Hiring for application {application_id} was cancelled by the HR Manager."
+
+    cursor.execute(
+        "UPDATE Applications SET status = ? WHERE application_id = ?",
+        ("ACCEPTED", application_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return f"Application {application_id} has been officially approved by {approved_by}."
+
+
+_restricted_tools_registered = False
+
+
+def _register_restricted_tools():
+    """Registers HR-only tools at runtime. Called only after simulate_hr_login succeeds."""
+    global _restricted_tools_registered
+
+    if _restricted_tools_registered:
+        return
+
+    mcp.add_tool(
+        _approve_final_hire_impl,
+        name="approve_final_hire",
+        description="Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only."
+    )
+
+    mcp.add_tool(
+        _approve_final_hire_with_confirmation_impl,
+        name="approve_final_hire_with_confirmation",
+        description="Finalizes hiring after explicit HR confirmation (human-in-the-loop)."
+    )
+
+    _restricted_tools_registered = True
+
+
 # Progress tracking
 @mcp.tool()
 async def batch_match_candidates(
@@ -142,7 +243,6 @@ async def batch_match_candidates(
 ) -> str:
     """Matches applicants against a job's required skills, reporting progress throughout the process."""
 
-    # JSON Schema Validation
     validate_or_raise(
         "batch_match",
         {
@@ -155,7 +255,6 @@ async def batch_match_candidates(
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Get required job skills
     cursor.execute(
         "SELECT skill FROM JobSkills WHERE job_id = ?",
         (job_id,)
@@ -167,7 +266,6 @@ async def batch_match_candidates(
         conn.close()
         return f"Error: No skills found for job_id {job_id}."
 
-    # Get applications
     if include_pending:
         cursor.execute(
             """
@@ -214,13 +312,12 @@ async def batch_match_candidates(
         overlap = candidate_skills & required_skills
         match_percentage = (len(overlap) / len(required_skills)) * 100
 
-        # استخدمي minimum_match فعليًا
         if match_percentage >= minimum_match:
             results.append(
                 f"Application {app['application_id']} : {match_percentage:.1f}% match"
             )
 
-        await ctx.session.send_progress(
+        await ctx.report_progress(
             progress=((i + 1) / total) * 100,
             total=100,
             message=f"Processed application {i + 1} of {total}"
@@ -234,6 +331,8 @@ async def batch_match_candidates(
         f"Batch matching completed for Job {job_id}.\n\n"
         + "\n".join(results)
     )
+
+
 # Sampling
 @mcp.tool()
 async def analyze_recruiter_note(
@@ -243,9 +342,8 @@ async def analyze_recruiter_note(
 ) -> str:
     """Analyzes recruiter notes using the client's model."""
 
-    # JSON Schema Validation
     validate_or_raise(
-        "analyze_note",
+        "recruiter_note",
         {
             "application_id": application_id,
             "analysis_type": analysis_type
@@ -278,7 +376,6 @@ async def analyze_recruiter_note(
 
     conn.close()
 
-    # Build prompt based on analysis type
     if analysis_type == "sentiment":
         prompt = (
             f'Classify the sentiment of this recruiter note as exactly one word '
@@ -317,109 +414,7 @@ async def analyze_recruiter_note(
         f"Result:\n{result}"
     )
 
-# Elicitation
-@mcp.tool()
-async def approve_final_hire_with_confirmation(
-    application_id: int,
-    approved_by: str,
-    approval_reason: str,
-    ctx: Context
-) -> str:
-    """Finalizes hiring after explicit HR confirmation."""
 
-    # JSON Schema Validation
-    validate_or_raise(
-        "approve_hire",
-        {
-            "application_id": application_id,
-            "approved_by": approved_by,
-            "approval_reason": approval_reason
-        }
-    )
-
-    # Authorization Check
-    if not hr_logged_in:
-        return "Error: This tool requires an active HR Manager session"
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # Server-side Validation
-    cursor.execute(
-        """
-        SELECT application_id, status
-        FROM Applications
-        WHERE application_id = ?
-        """,
-        (application_id,)
-    )
-
-    row = cursor.fetchone()
-
-    if row is None:
-        conn.close()
-        return f"Error: Application {application_id} does not exist."
-
-    current_status = row["status"]
-
-    if current_status == "REJECTED":
-        conn.close()
-        return (
-            f"Error: Application {application_id} was already REJECTED "
-            "and cannot be hired."
-        )
-
-    if current_status == "ACCEPTED":
-        conn.close()
-        return (
-            f"Application {application_id} is already ACCEPTED. "
-            "No changes made."
-        )
-
-    # Human-in-the-loop (Elicitation)
-    result = await ctx.session.elicit(
-        message=(
-            f"HR Manager '{approved_by}' wants to approve "
-            f"Application {application_id}.\n\n"
-            f"Reason:\n{approval_reason}\n\n"
-            "Do you confirm this hiring decision?"
-        ),
-        requestedSchema={
-            "type": "object",
-            "properties": {
-                "confirm": {
-                    "type": "boolean",
-                    "description": "Approve or reject the hiring decision."
-                }
-            },
-            "required": ["confirm"],
-            "additionalProperties": False
-        }
-    )
-
-    if result.action != "accept" or not result.content.get("confirm"):
-        conn.close()
-        return (
-            f"Hiring for application {application_id} "
-            "was cancelled by the HR Manager."
-        )
-
-    cursor.execute(
-        """
-        UPDATE Applications
-        SET status = ?
-        WHERE application_id = ?
-        """,
-        ("ACCEPTED", application_id)
-    )
-
-    conn.commit()
-    conn.close()
-
-    return (
-        f"Application {application_id} has been officially "
-        f"approved by {approved_by}."
-    )
 @mcp.prompt()
 def draft_interview_invite(
     candidate_name: str,
@@ -428,7 +423,6 @@ def draft_interview_invite(
 ) -> str:
     """A prompt template for generating an interview invitation email."""
 
-    # JSON Schema Validation
     validate_or_raise(
         "interview_prompt",
         {
@@ -439,17 +433,18 @@ def draft_interview_invite(
     )
 
     return f"""
-Please draft a professional and welcoming interview invitation email for a candidate named '{candidate_name}'.
+        Please draft a professional and welcoming interview invitation email for a candidate named '{candidate_name}'.
 
-They have been shortlisted for the '{job_title}' position at Talenta Recruitment.
+        They have been shortlisted for the '{job_title}' position at Talenta Recruitment.
 
-Include the following details:
-1. Congratulate them on passing the initial screening.
-2. Propose an interview scheduled for {interview_date}.
-3. Ask them to confirm their availability or suggest an alternative time.
-4. Mention that the meeting link will be shared after confirmation.
-5. Maintain a warm, professional, and encouraging tone.
-"""
+        Include the following details:
+        1. Congratulate them on passing the initial screening.
+        2. Propose an interview scheduled for {interview_date}.
+        3. Ask them to confirm their availability or suggest an alternative time.
+        4. Mention that the meeting link will be shared after confirmation.
+        5. Maintain a warm, professional, and encouraging tone.
+    """
+
 
 @mcp.prompt()
 def draft_rejection_email(
@@ -458,7 +453,6 @@ def draft_rejection_email(
 ) -> str:
     """Reusable starting point for drafting a polite rejection email to a candidate."""
 
-    # JSON Schema Validation
     validate_or_raise(
         "rejection_prompt",
         {
@@ -474,6 +468,7 @@ def draft_rejection_email(
         f"and invite them to apply for future roles that match their skills."
     )
 
+
 @mcp.prompt()
 def draft_job_offer(
     candidate_name: str,
@@ -482,7 +477,6 @@ def draft_job_offer(
 ) -> str:
     """A prompt template for generating a job offer email."""
 
-    # JSON Schema Validation
     validate_or_raise(
         "job_offer",
         {
@@ -493,19 +487,19 @@ def draft_job_offer(
     )
 
     return f"""
-Please draft a formal job offer email for '{candidate_name}' who has been selected for the '{job_title}' role at Talenta Recruitment.
+        Please draft a formal job offer email for '{candidate_name}' who has been selected for the '{job_title}' role at Talenta Recruitment.
 
-Include the following key points:
+        Include the following key points:
 
-1. Express our excitement to welcome them to the team.
-2. State the official job title ({job_title}) and the starting salary ({salary}).
-3. Mention that an official employment contract with benefits is attached.
-4. Ask the candidate to review the offer and reply by the end of the week.
-5. Maintain a professional, welcoming, and enthusiastic tone.
-"""
+        1. Express our excitement to welcome them to the team.
+        2. State the official job title ({job_title}) and the starting salary ({salary}).
+        3. Mention that an official employment contract with benefits is attached.
+        4. Ask the candidate to review the offer and reply by the end of the week.
+        5. Maintain a professional, welcoming, and enthusiastic tone.
+    """
 
 
 # run server
 if __name__ == "__main__":
-    print("Starting Talenta MCP Server on stdio transport...")
+    print("Starting Talenta MCP Server on stdio transport...", file=sys.stderr)
     mcp.run(transport="stdio")
