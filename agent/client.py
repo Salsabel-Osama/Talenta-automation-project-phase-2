@@ -1,8 +1,18 @@
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp import ClientSession
+import mcp.types as types
 import asyncio
 import os
+import google.generativeai as genai
+from config import GEMINI_API_KEY, MODEL_NAME, TEMPERATURE
 
+genai.configure(api_key=GEMINI_API_KEY)
+sampling_model = genai.GenerativeModel(
+    model_name=MODEL_NAME,
+    generation_config={
+        "temperature": TEMPERATURE,
+    }
+)
 
 class MCPClient:
 
@@ -10,6 +20,44 @@ class MCPClient:
         self.session = None
         self._stdio_ctx = None
         self._session_ctx = None
+
+    async def sampling_callback(self, *args) -> types.CreateMessageResult:
+            params = args[-1]
+            
+            print("\n" + "-"*50)
+            print("[MCP Client] Server requested LLM Sampling...")
+            print("-"*50)
+            
+            prompt = ""
+            for msg in params.messages:
+                if msg.content.type == "text":
+                    prompt += f"{msg.content.text}\n"
+            
+            try:
+                response = sampling_model.generate_content(prompt)
+                result_text = response.text.strip()
+                print(f"[Gemini Output]: {result_text}\n")
+                
+                return types.CreateMessageResult(
+                    role="assistant",
+                    content=types.TextContent(
+                        type="text",
+                        text=result_text
+                    ),
+                    model=MODEL_NAME,
+                    stopReason="endTurn"
+                )
+            except Exception as e:
+                print(f"[Error in Sampling]: {e}")
+                return types.CreateMessageResult(
+                    role="assistant",
+                    content=types.TextContent(
+                        type="text",
+                        text="Error processing sampling request."
+                    ),
+                    model=MODEL_NAME,
+                    stopReason="endTurn"
+                )
 
     async def connect(self):
         server_path = os.path.normpath(
@@ -27,7 +75,11 @@ class MCPClient:
         self._stdio_ctx = stdio_client(server)
         read_stream, write_stream = await self._stdio_ctx.__aenter__()
 
-        self._session_ctx = ClientSession(read_stream, write_stream)
+        self._session_ctx = ClientSession(
+            read_stream, 
+            write_stream,
+            sampling_callback=self.sampling_callback
+        )
         self.session = await self._session_ctx.__aenter__()
 
         await self.session.initialize()

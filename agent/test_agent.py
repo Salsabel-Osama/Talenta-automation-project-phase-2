@@ -55,12 +55,12 @@ async def main():
     )
 
     print("=" * 50)
-    print("Approve Hire")
+    print("Approve Hire with Confirmation (Elicitation)")
     print("=" * 50)
 
     print(
-        await agent.approve_hire(
-            4,
+        await agent.approve_hire_with_confirmation(
+            8,
             "Youssef",
             "Excellent Candidate overall"
         )
@@ -69,4 +69,5 @@ async def main():
     await agent.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

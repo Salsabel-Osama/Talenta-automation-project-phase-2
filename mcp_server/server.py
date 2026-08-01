@@ -501,5 +501,5 @@ def draft_job_offer(
 
 # run server
 if __name__ == "__main__":
-    print("Starting Talenta MCP Server on stdio transport...", file=sys.stderr)
+    print("Starting Talenta MCP Server on HTTP transport...", file=sys.stderr)
     mcp.run(transport="sse")
