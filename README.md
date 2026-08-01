@@ -166,3 +166,87 @@ The following diagram represents the database structure and relationships.
 
 ![Talenta Recruitment ERD](db/ERD.png)
 ---
+# MCP Server Implementation
+
+The MCP Server provides a secure communication layer between the AI Assistant and Talenta's recruitment database.
+
+Instead of allowing the AI model to access the database directly, every request passes through the MCP Server, where it is validated, authorized, and executed using predefined tools.
+
+This approach ensures that recruiters receive intelligent assistance while maintaining the security and integrity of company data.
+
+The MCP Server implements the following protocol concerns:
+
+- **Capability Negotiation**
+  - The client and server exchange supported capabilities during initialization before any interaction begins.
+
+- **Notifications**
+  - The server notifies the client when the available tool set changes, allowing the client to update dynamically.
+
+- **Elicitation**
+  - Sensitive operations require explicit human confirmation before execution.
+
+- **Resources**
+  - Read-only company information such as recruitment policies and guidelines is exposed as MCP resources.
+
+- **Prompt Templates**
+  - Frequently used recruitment tasks are available through reusable prompt templates.
+
+- **Sampling**
+  - The server delegates reasoning tasks to the AI model when intelligent decision-making is required.
+
+- **Progress Tracking**
+  - Long-running operations provide progress updates until completion.
+
+- **Defensive Tool Design**
+  - All tool inputs are validated using JSON Schema, server-side validation, and authorization checks before interacting with the database.
+
+- **Transport**
+  - The project uses STDIO during development and is designed to support Streamable HTTP for production deployment.
+
+---
+
+# AI Agent Integration
+
+The AI Agent acts as the intelligent assistant used by recruiters during the hiring process.
+
+Instead of communicating directly with the database, the AI Agent interacts with the MCP Server through an MCP Client.
+
+The AI Agent is responsible for:
+
+- Understanding recruiter requests.
+- Selecting the appropriate MCP tool.
+- Sending requests through the MCP Client.
+- Receiving validated responses from the MCP Server.
+- Presenting clear and structured results to the recruiter.
+
+This architecture ensures that all database operations remain secure while allowing the AI Assistant to support recruitment tasks efficiently.
+
+---
+
+# System Workflow
+
+The complete request flow is shown below:
+
+```text
+Recruiter
+    │
+    ▼
+AI Agent
+    │
+    ▼
+MCP Client
+    │
+    ▼
+MCP Server
+    │
+    ▼
+Validated MCP Tools
+    │
+    ▼
+Recruitment Database
+    │
+    ▼
+Response
+```
+
+Every request follows this workflow, ensuring that the AI Assistant never accesses the recruitment database directly. All interactions are validated, authorized, and executed through the MCP Server.
