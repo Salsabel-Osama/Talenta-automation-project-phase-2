@@ -347,3 +347,5 @@ For production deployment, the server is designed to transition to **Streamable 
 | Reject Candidate | Write | Yes |
 
 Write operations require human confirmation because they modify recruitment decisions and may impact candidates.
+
+- **RAG Search Tool:** Added `search_knowledge_base` tool using BM25 to instantly search unstructured HR notes.
