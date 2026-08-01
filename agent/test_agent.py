@@ -27,7 +27,7 @@ async def main():
     print(
         await agent.hr_login(
             "Youssef",
-            "HR Manager"
+            "HR_MANAGER"
         )
     )
 
@@ -60,9 +60,9 @@ async def main():
 
     print(
         await agent.approve_hire(
-            1,
+            4,
             "Youssef",
-            "Excellent Candidate"
+            "Excellent Candidate overall"
         )
     )
 
