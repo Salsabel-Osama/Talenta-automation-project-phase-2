@@ -1,0 +1,10 @@
+mcp
+pydantic
+jsonschema
+rank_bm25
+httpx
+starlette
+uvicorn
+python-dotenv
+typing_extensions
+requests

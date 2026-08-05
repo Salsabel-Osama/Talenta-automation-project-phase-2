@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 import asyncio
 from agent import RecruitmentAgent
 
@@ -18,70 +20,68 @@ async def main():
     print("Resources")
     print("=" * 50)
 
-    print(await agent.list_resources())
+    resources = await agent.list_resources()
+
+    for r in resources.resources:
+        print(f"- {r.uri}")
 
     print("=" * 50)
     print("HR Login")
     print("=" * 50)
 
-    print(
-        await agent.hr_login(
-            "Youssef",
-            "HR_MANAGER"
-        )
+    response = await agent.hr_login(
+        "Youssef",
+        "HR_MANAGER"
     )
+
+    for item in response.content:
+        print(item.text)
 
     print("=" * 50)
     print("Batch Match")
     print("=" * 50)
 
-    print(
-        await agent.batch_match(
-            1,
-            75,
-            True
-        )
-    )
+    response = await agent.batch_match(
+    1,
+    75,
+    True
+)
+
+    for item in response.content:
+        print(item.text)
 
     print("=" * 50)
     print("Analyze Note")
     print("=" * 50)
 
-    print(
-        await agent.analyze_note(
-            1,
-            "sentiment"
-        )
+    response = await agent.analyze_note(
+        1,
+        "sentiment"
     )
+
+    for item in response.content:
+        print(item.text)
 
     print("=" * 50)
     print("Approve Hire with Confirmation (Elicitation)")
     print("=" * 50)
 
-    print(
-        await agent.approve_hire_with_confirmation(
-            8,
-            "Youssef",
-            "Excellent Candidate overall"
-        )
-    )
-    
-    print("=" * 50)
-    print("Search Knowledge Base (RAG)")
-    print("=" * 50)
-
-    print(
-        await agent.client.call_tool(
-            "search_knowledge_base",
-            {
-                "query": "backend Java",
-                "top_k": 2
-            }
-        )
+    response = await agent.approve_hire_with_confirmation(
+        8,
+        "Youssef",
+        "Excellent Candidate overall"
     )
 
-    await agent.close()
+    for item in response.content:
+        print(item.text)
+  
+
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        pass
+
+

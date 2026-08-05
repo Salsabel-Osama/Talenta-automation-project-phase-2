@@ -4,7 +4,6 @@ import asyncio
 import sys
 from db import get_connection
 from mcp.types import SamplingMessage, TextContent
-from keyword_search import KeywordStore
 
 
 # Capability negotiation & Transports
@@ -500,54 +499,8 @@ def draft_job_offer(
     """
 
 
-# ==========================================
-# Add-On Lab: RAG (Search Knowledge Base)
-# ==========================================
-
-knowledge_store = KeywordStore()
-
-def _load_knowledge_base():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT application_id, recruiter_notes FROM Applications WHERE recruiter_notes IS NOT NULL")
-    
-    for row in cursor.fetchall():
-        knowledge_store.upsert(
-            payload=row["recruiter_notes"],
-            metadata={"application_id": row["application_id"]}
-        )
-    conn.close()
-
-_load_knowledge_base()
 
 
-@mcp.tool()
-async def search_knowledge_base(query: str, top_k: int = 3) -> str:
-    """Searches unstructured recruiter notes for specific keywords."""
-    
-    # 1. Validation (The Server-side check required by Rubric)
-    validate_or_raise(
-        "search_kb",
-        {"query": query, "top_k": top_k}
-    )
-    
-    # 2. Search using BM25
-    matches = knowledge_store.query(
-        query_text=query,
-        top_k=top_k
-    )
-    
-    if not matches:
-        return f"No relevant records found for query: '{query}'"
-    
-    # 3. Format results
-    results = []
-    for match in matches:
-        app_id = match["metadata"]["application_id"]
-        note = match["payload"]
-        results.append(f"App {app_id}: {note}")
-        
-    return f"Search Results for '{query}':\n\n" + "\n".join(results)
 
 
 # run server

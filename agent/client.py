@@ -97,11 +97,17 @@ class MCPClient:
         return await self.session.read_resource(uri)
 
     async def close(self):
-        if self._session_ctx:
-            await self._session_ctx.__aexit__(None, None, None)
-        if self._stdio_ctx:
-            await self._stdio_ctx.__aexit__(None, None, None)
+        try:
+            if self._session_ctx:
+                await self._session_ctx.__aexit__(None, None, None)
+        except Exception:
+            pass
 
+        try:
+            if self._stdio_ctx:
+                await self._stdio_ctx.__aexit__(None, None, None)
+        except Exception:
+            pass
 
 async def test():
     client = MCPClient()

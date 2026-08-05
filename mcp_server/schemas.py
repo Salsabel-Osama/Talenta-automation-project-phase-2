@@ -247,26 +247,7 @@ REJECTION_PROMPT_SCHEMA = {
     "additionalProperties": False
 }
 
-# -------------------------------
-# Search Knowledge Base Schema
-# -------------------------------
-SEARCH_KB_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "query": {
-            "type": "string",
-            "minLength": 2,
-            "maxLength": 100
-        },
-        "top_k": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10
-        }
-    },
-    "required": ["query"],
-    "additionalProperties": False
-}
+
 
 # -------------------------------
 # All Schemas
@@ -281,5 +262,5 @@ SCHEMAS = {
     "job_offer": JOB_OFFER_SCHEMA,
     "candidate": CANDIDATE_SCHEMA,
     "rejection_prompt": REJECTION_PROMPT_SCHEMA,
-    "search_kb": SEARCH_KB_SCHEMA
+    
 }
