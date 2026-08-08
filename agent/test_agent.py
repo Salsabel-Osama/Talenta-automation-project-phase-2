@@ -1,6 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
+
 import asyncio
+
 from agent import RecruitmentAgent
 
 
@@ -8,80 +10,160 @@ async def main():
 
     agent = RecruitmentAgent()
 
-    print("=" * 50)
-    print("Gemini")
-    print("=" * 50)
+    try:
 
-    print(agent.ask("Say hello in one sentence."))
+        # ==========================================
+        # Gemini
+        # ==========================================
 
-    await agent.connect_mcp()
+        print("=" * 50)
+        print("Gemini")
+        print("=" * 50)
 
-    print("=" * 50)
-    print("Resources")
-    print("=" * 50)
+        print(
+            agent.ask(
+                "Say hello in one sentence."
+            )
+        )
 
-    resources = await agent.list_resources()
+        # ==========================================
+        # MCP Connection
+        # ==========================================
 
-    for r in resources.resources:
-        print(f"- {r.uri}")
+        await agent.connect_mcp()
 
-    print("=" * 50)
-    print("HR Login")
-    print("=" * 50)
+        # ==========================================
+        # Resources
+        # ==========================================
 
-    response = await agent.hr_login(
-        "Youssef",
-        "HR_MANAGER"
-    )
+        print("=" * 50)
+        print("Resources")
+        print("=" * 50)
 
-    for item in response.content:
-        print(item.text)
+        resources = await agent.list_resources()
 
-    print("=" * 50)
-    print("Batch Match")
-    print("=" * 50)
+        for resource in resources.resources:
+            print(f"- {resource.uri}")
 
-    response = await agent.batch_match(
-    1,
-    75,
-    True
-)
+        # ==========================================
+        # HR Login
+        # ==========================================
 
-    for item in response.content:
-        print(item.text)
+        print("=" * 50)
+        print("HR Login")
+        print("=" * 50)
 
-    print("=" * 50)
-    print("Analyze Note")
-    print("=" * 50)
+        response = await agent.hr_login(
+            "Youssef",
+            "HR_MANAGER"
+        )
 
-    response = await agent.analyze_note(
-        1,
-        "sentiment"
-    )
+        for item in response.content:
+            if hasattr(item, "text"):
+                print(item.text)
 
-    for item in response.content:
-        print(item.text)
+        # ==========================================
+        # Batch Match
+        # ==========================================
 
-    print("=" * 50)
-    print("Approve Hire with Confirmation (Elicitation)")
-    print("=" * 50)
+        print("=" * 50)
+        print("Batch Match")
+        print("=" * 50)
 
-    response = await agent.approve_hire_with_confirmation(
-        8,
-        "Youssef",
-        "Excellent Candidate overall"
-    )
+        response = await agent.batch_match(
+            job_id=1,
+            minimum_match=75,
+            include_pending=True
+        )
 
-    for item in response.content:
-        print(item.text)
-  
+        for item in response.content:
+            if hasattr(item, "text"):
+                print(item.text)
 
+        # ==========================================
+        # Analyze Recruiter Note
+        # ==========================================
+
+        print("=" * 50)
+        print("Analyze Note")
+        print("=" * 50)
+
+        response = await agent.analyze_note(
+            application_id=1,
+            analysis_type="sentiment"
+        )
+
+        for item in response.content:
+            if hasattr(item, "text"):
+                print(item.text)
+
+        # ==========================================
+        # Human-in-the-Loop Confirmation
+        # ==========================================
+
+        print("=" * 50)
+        print("Approve Hire - Human Confirmation")
+        print("=" * 50)
+
+        application_id = 8
+        approved_by = "Youssef"
+        approval_reason = "Excellent Candidate overall"
+
+        print(
+            f"\nApplication {application_id} "
+            f"is ready for final approval."
+        )
+
+        print(
+            f"Approved by: {approved_by}"
+        )
+
+        print(
+            f"Reason: {approval_reason}"
+        )
+
+        confirmation = input(
+            "\nConfirm hiring? (yes/no): "
+        ).strip().lower()
+
+        if confirmation not in {
+            "yes",
+            "y"
+        }:
+
+            print(
+                f"\nHiring for application "
+                f"{application_id} was cancelled."
+            )
+
+            return
+
+        # ==========================================
+        # Final Hire
+        # ==========================================
+
+        print("=" * 50)
+        print("Final Hire")
+        print("=" * 50)
+
+        response = await agent.approve_hire(
+            application_id=application_id,
+            approved_by=approved_by,
+            approval_reason=approval_reason
+        )
+
+        for item in response.content:
+            if hasattr(item, "text"):
+                print(item.text)
+
+    finally:
+
+        # ==========================================
+        # Close MCP
+        # ==========================================
+
+        await agent.close()
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception:
-        pass
-
-
+    asyncio.run(main())
