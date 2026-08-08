@@ -1,239 +1,137 @@
-from typing import Optional, Dict, Any
+import google.generativeai as genai
 
-from chromadb import PersistentClient
+from agent.config import (
+    GEMINI_API_KEY,
+    MODEL_NAME
+)
 
-from rag.chunking import DocumentChunker
-from rag.embedding import EmbeddingModel
+
+genai.configure(
+    api_key=GEMINI_API_KEY
+)
 
 
-class VectorDatabase:
-
-    COLLECTION_NAME = "talenta_documents"
-    DB_PATH = "rag/chroma_db"
+class SelfRAGVerifier:
 
     def __init__(self):
 
-        self.client = PersistentClient(
-            path=self.DB_PATH
+        self.model = genai.GenerativeModel(
+            MODEL_NAME
         )
 
-        self.collection = self.client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
-            metadata={
-                "hnsw:space": "cosine"
+
+    def verify(
+        self,
+        question,
+        context,
+        answer
+    ):
+
+        if not context:
+
+            return {
+                "passed": False,
+                "relevant": False,
+                "supported": False,
+                "reason": "No retrieved content."
             }
-        )
 
-        self.embedder = EmbeddingModel()
 
-    # ==================================================
-    # Build Vector Database
-    # ==================================================
+        prompt = f"""
+You are a Self-RAG verification system.
 
-    def build_database(self):
+Your job is to verify a generated answer before it reaches the user.
 
-        # Remove previous collection to avoid
-        # duplicate or outdated chunks.
+Question:
+{question}
+
+Retrieved Context:
+{context}
+
+Generated Answer:
+{answer}
+
+Perform two explicit checks.
+
+1. RELEVANCE:
+Is the retrieved context actually relevant to answering the question?
+
+2. SUPPORT:
+Is the generated answer completely supported by the retrieved context?
+
+Do not use outside knowledge.
+
+Return exactly:
+
+RELEVANT: YES or NO
+SUPPORTED: YES or NO
+REASON: <short explanation>
+"""
+
+
         try:
 
-            self.client.delete_collection(
-                self.COLLECTION_NAME
+            response = self.model.generate_content(
+                prompt
             )
 
-        except Exception:
-            pass
+            text = response.text.strip()
 
-        self.collection = self.client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
-            metadata={
-                "hnsw:space": "cosine"
-            }
-        )
 
-        chunker = DocumentChunker()
-
-        chunks = chunker.chunk_folder()
-
-        if not chunks:
-
-            print(
-                "No document chunks were found."
-            )
-
-            return
-
-        embedded_chunks = self.embedder.embed_documents(
-            chunks
-        )
-
-        ids = []
-        documents = []
-        embeddings = []
-        metadatas = []
-
-        for document, embedding in embedded_chunks:
-
-            chunk_id = document.metadata.get(
-                "chunk_id"
-            )
-
-            if not chunk_id:
-
-                raise ValueError(
-                    "Every document chunk must have a chunk_id."
-                )
-
-            ids.append(
-                str(chunk_id)
-            )
-
-            documents.append(
-                document.page_content
-            )
-
-            embeddings.append(
-                embedding
-            )
-
-            metadatas.append(
-                document.metadata
-            )
-
-        self.collection.upsert(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas
-        )
-
-        print(
-            f"Successfully indexed {len(ids)} chunks."
-        )
-
-    # ==================================================
-    # Retrieve Documents
-    # ==================================================
-
-    def retrieve(
-        self,
-        query: str,
-        top_k: int = 5,
-        metadata_filter: Optional[Dict[str, Any]] = None
-    ):
-
-        if not query or not query.strip():
+        except Exception as e:
 
             return {
-                "documents": [],
-                "metadatas": [],
-                "distances": []
+                "passed": False,
+                "relevant": False,
+                "supported": False,
+                "reason": f"Verification error: {e}"
             }
 
-        # Prevent requesting more results
-        # than the collection contains.
-        collection_count = self.collection.count()
 
-        if collection_count == 0:
+        relevant = False
+        supported = False
+        reason = ""
 
-            return {
-                "documents": [],
-                "metadatas": [],
-                "distances": []
-            }
 
-        top_k = min(
-            max(top_k, 1),
-            collection_count
-        )
+        for line in text.split("\n"):
 
-        query_embedding = self.embedder.embed_text(
-            query
-        )
+            line = line.strip()
 
-        query_params = {
-            "query_embeddings": [query_embedding],
-            "n_results": top_k
-        }
 
-        if metadata_filter:
+            if line.startswith("RELEVANT:"):
 
-            query_params["where"] = metadata_filter
+                value = line.replace(
+                    "RELEVANT:",
+                    ""
+                ).strip().upper()
 
-        results = self.collection.query(
-            **query_params
-        )
+                relevant = value == "YES"
 
-        documents = results.get(
-            "documents",
-            [[]]
-        )
 
-        metadatas = results.get(
-            "metadatas",
-            [[]]
-        )
+            elif line.startswith("SUPPORTED:"):
 
-        distances = results.get(
-            "distances",
-            [[]]
-        )
+                value = line.replace(
+                    "SUPPORTED:",
+                    ""
+                ).strip().upper()
+
+                supported = value == "YES"
+
+
+            elif line.startswith("REASON:"):
+
+                reason = line.replace(
+                    "REASON:",
+                    ""
+                ).strip()
+
+
+        passed = relevant and supported
+
 
         return {
-            "documents": documents[0] if documents else [],
-            "metadatas": metadatas[0] if metadatas else [],
-            "distances": distances[0] if distances else []
+            "passed": passed,
+            "relevant": relevant,
+            "supported": supported,
+            "reason": reason
         }
-
-
-# ==================================================
-# Test
-# ==================================================
-
-if __name__ == "__main__":
-
-    db = VectorDatabase()
-
-    print("=" * 60)
-    print("BUILDING VECTOR DATABASE")
-    print("=" * 60)
-
-    db.build_database()
-
-    print("\n")
-
-    print("=" * 60)
-    print("TEST RETRIEVAL")
-    print("=" * 60)
-
-    results = db.retrieve(
-        query="Can recruiters send offer letters?",
-        top_k=3
-    )
-
-    for index, (
-        document,
-        metadata,
-        distance
-    ) in enumerate(
-        zip(
-            results["documents"],
-            results["metadatas"],
-            results["distances"]
-        ),
-        start=1
-    ):
-
-        print(f"\nResult {index}")
-        print("-" * 60)
-
-        print(
-            f"Distance: {distance}"
-        )
-
-        print(
-            f"Metadata: {metadata}"
-        )
-
-        print(
-            document
-        )
