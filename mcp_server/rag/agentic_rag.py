@@ -1,18 +1,24 @@
 import time
-import google.generativeai as genai
+import os
+from mistralai.client import Mistral
+from self_rag import SelfRAGVerifier
+from vector_db import VectorDatabase
 
-from rag.vector_db import VectorDatabase
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
-from agent.config import (
-    GEMINI_API_KEY,
-    MODEL_NAME
+MISTRAL_MODEL = os.getenv(
+    "MISTRAL_MODEL",
+    "mistral-small-2603"
 )
 
+if not MISTRAL_API_KEY:
+    raise RuntimeError(
+        "MISTRAL_API_KEY is not set in .env"
+    )
 
-genai.configure(
-    api_key=GEMINI_API_KEY
+mistral_client = Mistral(
+    api_key=MISTRAL_API_KEY
 )
-
 
 class AgenticRAG:
 
@@ -20,29 +26,46 @@ class AgenticRAG:
 
         self.vector_db = VectorDatabase()
 
-        self.model = genai.GenerativeModel(
-            MODEL_NAME
-        )
-
+        self.model = mistral_client
         # Maximum number of retrieval cycles
         self.max_iterations = 3
-
+        self.verifier = SelfRAGVerifier()
     # ==========================================
     # LLM Generation
     # ==========================================
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str):
 
         try:
 
-            response = self.model.generate_content(
-                prompt
+            response = self.model.chat.complete(
+                model=MISTRAL_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=300
             )
 
-            if not response or not response.text:
-
+            if not response:
                 return ""
 
-            return response.text.strip()
+            if not response.choices:
+                return ""
+
+            message = response.choices[0].message
+
+            if not message:
+                return ""
+
+            content = message.content
+
+            if content is None:
+                return ""
+
+            return str(content).strip()
 
         except Exception as e:
 
@@ -410,6 +433,47 @@ New Query: <query if more information is needed>
             ],
             "latency": latency
         }
+
+
+
+def run_agentic_rag(question: str):
+    """
+    Adapter for the retrieval evaluation pipeline.
+    Keeps the existing AgenticRAG.run() interface unchanged.
+    """
+
+    rag = AgenticRAG()
+
+    result = rag.run(
+        question
+    )
+
+    return {
+        "answer": result.get(
+            "response",
+            ""
+        ),
+        "query": result.get(
+            "query",
+            question
+        ),
+        "retrieved_context": result.get(
+            "retrieved_context",
+            []
+        ),
+        "iterations": result.get(
+            "iterations",
+            0
+        ),
+        "reasoning_history": result.get(
+            "reasoning_history",
+            []
+        ),
+        "latency": result.get(
+            "latency",
+            0.0
+        )
+    }
 
 
 # ==========================================

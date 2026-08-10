@@ -1,9 +1,7 @@
 from chromadb import PersistentClient
 
-from rag.chunking import DocumentChunker
-from rag.embedding import EmbeddingModel
-
-
+from chunking import DocumentChunker
+from embedding import EmbeddingModel
 class VectorDatabase:
 
     def __init__(self):
@@ -158,6 +156,10 @@ class VectorDatabase:
             ),
             "distances": results.get(
                 "distances",
+                [[]]
+            ),
+            "ids": results.get(
+                "ids",
                 [[]]
             ),
         }

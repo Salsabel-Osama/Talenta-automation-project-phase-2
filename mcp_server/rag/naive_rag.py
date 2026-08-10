@@ -1,29 +1,34 @@
-import google.generativeai as genai
+import os
 
-from rag.self_rag import SelfRAGVerifier
-from rag.vector_db import VectorDatabase
+from dotenv import load_dotenv
+from mistralai.client import Mistral
 
-from agent.config import (
-    GEMINI_API_KEY,
-    MODEL_NAME
+from self_rag import SelfRAGVerifier
+from vector_db import VectorDatabase
+
+load_dotenv()
+
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+MISTRAL_MODEL = os.getenv(
+    "MISTRAL_RAG_MODEL",
+    "mistral-small-2603"
 )
 
+if not MISTRAL_API_KEY:
+    raise RuntimeError(
+        "MISTRAL_API_KEY is not set."
+    )
 
-genai.configure(
-    api_key=GEMINI_API_KEY
+mistral_client = Mistral(
+    api_key=MISTRAL_API_KEY
 )
-
-
 class NaiveRAG:
 
     def __init__(self):
 
         self.vector_db = VectorDatabase()
 
-        self.model = genai.GenerativeModel(
-            MODEL_NAME
-        )
-
+      
         self.verifier = SelfRAGVerifier()
 
     # ==========================================
@@ -140,28 +145,40 @@ Answer
 
         try:
 
-            response = self.model.generate_content(
-                prompt
+            response = mistral_client.chat.complete(
+                model=MISTRAL_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=300
             )
 
-            if not response.text:
+            if not response:
+                return "I don't have enough information."
 
-                return (
-                    "I don't have enough information."
-                )
+            if not response.choices:
+                return "I don't have enough information."
 
-            return response.text.strip()
+            content = response.choices[0].message.content
+
+            if not content:
+                return "I don't have enough information."
+
+            return str(content).strip()
 
         except Exception as e:
 
             print(
-                f"Generation Error: {e}"
+                f"Mistral Generation Error: {e}"
             )
 
             return (
                 "I don't have enough information."
             )
-
     # ==========================================
     # Answer Question
     # ==========================================
@@ -252,7 +269,15 @@ Answer
             "verification": verification
         }
 
+def run_naive_rag(question: str, top_k: int = 5):
+    rag = NaiveRAG()
 
+    result = rag.answer(
+        question=question,
+        top_k=top_k
+    )
+
+    return result["answer"]
 # ==========================================
 # Test
 # ==========================================

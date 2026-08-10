@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
 
@@ -94,21 +94,52 @@ class DocumentChunker:
     # Chunk All Documents
     # ======================================
 
-    def chunk_folder(self, folder: str = "documents"):
+    def chunk_folder(self, folder=None):
 
-        folder = Path(folder)
+        if folder is None:
+            folder = (
+                Path(__file__).resolve().parent
+                / "documents"
+            )
+        else:
+            folder = Path(folder).resolve()
+
+        print(
+            f"Loading documents from: {folder}"
+        )
+
+        if not folder.exists():
+            print(
+                f"ERROR: Documents folder not found: {folder}"
+            )
+            return []
+
+        files = sorted(
+            folder.glob("*.md")
+        )
+
+        print(
+            f"Found {len(files)} markdown documents."
+        )
 
         all_chunks = []
 
-        for file in sorted(folder.glob("*.md")):
+        for file in files:
+
+            print(
+                f"Processing: {file.name}"
+            )
 
             all_chunks.extend(
                 self.chunk_document(file)
             )
 
+        print(
+            f"Created {len(all_chunks)} chunks."
+        )
+
         return all_chunks
-
-
+    
 # ======================================
 # Test
 # ======================================

@@ -1,24 +1,112 @@
-import google.generativeai as genai
 
-from agent.config import (
-    GEMINI_API_KEY,
-    MODEL_NAME
+import os
+
+from dotenv import load_dotenv
+from mistralai.client import Mistral
+
+
+load_dotenv()
+
+
+# ============================================================
+# Mistral Client
+# ============================================================
+
+MISTRAL_API_KEY = os.getenv(
+    "MISTRAL_API_KEY"
+)
+
+MISTRAL_MODEL = os.getenv(
+    "MISTRAL_RAG_MODEL",
+    "mistral-small-2603"
 )
 
 
-genai.configure(
-    api_key=GEMINI_API_KEY
+if not MISTRAL_API_KEY:
+
+    raise RuntimeError(
+        "MISTRAL_API_KEY is not set. "
+        "Add it to your .env file."
+    )
+
+
+mistral_client = Mistral(
+    api_key=MISTRAL_API_KEY
 )
 
+
+# ============================================================
+# Self-RAG Verifier
+# ============================================================
 
 class SelfRAGVerifier:
 
     def __init__(self):
 
-        self.model = genai.GenerativeModel(
-            MODEL_NAME
-        )
+        self.client = mistral_client
 
+        self.model = MISTRAL_MODEL
+
+
+    # ========================================================
+    # Mistral Generation
+    # ========================================================
+
+    def generate(
+        self,
+        prompt: str
+    ) -> str:
+
+        try:
+
+            response = self.client.chat.complete(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=150
+            )
+
+            if not response:
+
+                return ""
+
+            if not response.choices:
+
+                return ""
+
+            message = response.choices[0].message
+
+            if not message:
+
+                return ""
+
+            content = message.content
+
+            if content is None:
+
+                return ""
+
+            return str(
+                content
+            ).strip()
+
+        except Exception as e:
+
+            print(
+                f"[Self-RAG] Mistral error: {e}"
+            )
+
+            return ""
+
+
+    # ========================================================
+    # Verify
+    # ========================================================
 
     def verify(
         self,
@@ -54,10 +142,10 @@ Generated Answer:
 Perform two explicit checks.
 
 1. RELEVANCE:
-Is the retrieved context actually relevant to answering the question?
+   Is the retrieved context actually relevant to answering the question?
 
 2. SUPPORT:
-Is the generated answer completely supported by the retrieved context?
+   Is the generated answer completely supported by the retrieved context?
 
 Do not use outside knowledge.
 
@@ -65,31 +153,29 @@ Return exactly:
 
 RELEVANT: YES or NO
 SUPPORTED: YES or NO
-REASON: <short explanation>
+REASON:
 """
 
 
-        try:
-
-            response = self.model.generate_content(
-                prompt
-            )
-
-            text = response.text.strip()
+        text = self.generate(
+            prompt
+        )
 
 
-        except Exception as e:
+        if not text:
 
             return {
                 "passed": False,
                 "relevant": False,
                 "supported": False,
-                "reason": f"Verification error: {e}"
+                "reason": "Verification returned an empty response."
             }
 
 
         relevant = False
+
         supported = False
+
         reason = ""
 
 
@@ -98,35 +184,51 @@ REASON: <short explanation>
             line = line.strip()
 
 
-            if line.startswith("RELEVANT:"):
+            if line.startswith(
+                "RELEVANT:"
+            ):
 
                 value = line.replace(
                     "RELEVANT:",
-                    ""
+                    "",
+                    1
                 ).strip().upper()
 
-                relevant = value == "YES"
+                relevant = (
+                    value == "YES"
+                )
 
 
-            elif line.startswith("SUPPORTED:"):
+            elif line.startswith(
+                "SUPPORTED:"
+            ):
 
                 value = line.replace(
                     "SUPPORTED:",
-                    ""
+                    "",
+                    1
                 ).strip().upper()
 
-                supported = value == "YES"
+                supported = (
+                    value == "YES"
+                )
 
 
-            elif line.startswith("REASON:"):
+            elif line.startswith(
+                "REASON:"
+            ):
 
                 reason = line.replace(
                     "REASON:",
-                    ""
+                    "",
+                    1
                 ).strip()
 
 
-        passed = relevant and supported
+        passed = (
+            relevant
+            and supported
+        )
 
 
         return {
@@ -135,3 +237,4 @@ REASON: <short explanation>
             "supported": supported,
             "reason": reason
         }
+

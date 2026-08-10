@@ -65,7 +65,7 @@ class HybridSearchRAG:
     def search(
         self,
         query: str,
-        alpha: float = 0.5
+        alpha: float = 0.7
     ) -> List[Dict[str, Any]]:
 
         if not query or not query.strip():
@@ -84,36 +84,31 @@ class HybridSearchRAG:
         # 1. BM25 Retrieval
         # ==================================
 
-        tokenized_query = (
-            query.lower().split()
-        )
+        tokenized_query = query.lower().split()
 
         bm25_scores = self.bm25.get_scores(
             tokenized_query
         )
 
-        bm25_normalized = (
-            self._normalize_scores(
-                bm25_scores.tolist()
-            )
+        bm25_normalized = self._normalize_scores(
+            bm25_scores.tolist()
         )
 
         # ==================================
         # 2. Vector Retrieval
         # ==================================
 
+        vector_top_k = min(
+            self.top_k * 3,
+            len(self.documents)
+        )
+
         vector_results = self.vector_db.retrieve(
             query=query,
-            top_k=len(self.documents)
+            top_k=vector_top_k
         )
-
         vector_documents = vector_results.get(
             "documents",
-            []
-        )
-
-        vector_metadatas = vector_results.get(
-            "metadatas",
             []
         )
 
@@ -122,53 +117,73 @@ class HybridSearchRAG:
             []
         )
 
+        vector_ids = vector_results.get(
+            "ids",
+            []
+        )
+
+        # Chroma returns nested lists
+        if vector_documents and isinstance(
+            vector_documents[0],
+            list
+        ):
+            vector_documents = vector_documents[0]
+
+        if vector_distances and isinstance(
+            vector_distances[0],
+            list
+        ):
+            vector_distances = vector_distances[0]
+
+        if vector_ids and isinstance(
+            vector_ids[0],
+            list
+        ):
+            vector_ids = vector_ids[0]
+
         # ==================================
-        # Chroma returns documents ordered
-        # by similarity.
-        #
-        # We map every returned document to
-        # its original document index using
-        # the content.
+        # Map vector scores by chunk_id
         # ==================================
 
         vector_score_map = {}
 
-        for index, document in enumerate(
-            vector_documents
+        for chunk_id, distance in zip(
+            vector_ids,
+            vector_distances
         ):
 
-            if index >= len(vector_distances):
+            if not isinstance(
+                distance,
+                (int, float)
+            ):
                 continue
 
-            distance = vector_distances[index]
-
-            # Chroma cosine distance:
-            # smaller distance = better result
-            #
-            # Convert it to similarity.
             similarity = 1.0 - distance
 
             vector_score_map[
-                document
+                chunk_id
             ] = similarity
+
+        # ==================================
+        # Get Vector Score For Every Document
+        # ==================================
 
         vector_raw_scores = []
 
         for document in self.documents:
 
-            content = document["content"]
+            chunk_id = document["metadata"].get(
+                "chunk_id"
+            )
 
             vector_raw_scores.append(
                 vector_score_map.get(
-                    content,
+                    chunk_id,
                     0.0
                 )
             )
-
-        vector_normalized = (
-            self._normalize_scores(
-                vector_raw_scores
-            )
+        vector_normalized = self._normalize_scores(
+            vector_raw_scores
         )
 
         # ==================================
@@ -181,13 +196,9 @@ class HybridSearchRAG:
             self.documents
         ):
 
-            vector_score = (
-                vector_normalized[index]
-            )
+            vector_score = vector_normalized[index]
 
-            bm25_score = (
-                bm25_normalized[index]
-            )
+            bm25_score = bm25_normalized[index]
 
             hybrid_score = (
                 alpha * vector_score
@@ -217,12 +228,11 @@ class HybridSearchRAG:
             )
 
         # ==================================
-        # 4. Sort by Hybrid Score
+        # 4. Sort
         # ==================================
 
         hybrid_results.sort(
-            key=lambda item:
-                item["hybrid_score"],
+            key=lambda item: item["hybrid_score"],
             reverse=True
         )
 
