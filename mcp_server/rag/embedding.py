@@ -8,7 +8,7 @@ class EmbeddingModel:
     def __init__(self):
 
         self.embedding_model = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
+            model="gemini-embedding-001",
             google_api_key=GEMINI_API_KEY,
         )
 
@@ -28,7 +28,9 @@ class EmbeddingModel:
 
         texts = [doc.page_content for doc in documents]
 
-        embeddings = self.embedding_model.embed_documents(texts)
+        embeddings = self.embedding_model.embed_documents(
+            texts
+        )
 
         return list(zip(documents, embeddings))
 
@@ -47,9 +49,16 @@ if __name__ == "__main__":
 
     embedder = EmbeddingModel()
 
-    embedded_chunks = embedder.embed_documents(chunks)
+    embedded_chunks = embedder.embed_documents(
+        chunks
+    )
 
     print("=" * 60)
     print("Chunks:", len(chunks))
     print("Embeddings:", len(embedded_chunks))
-    print("Embedding Dimension:", len(embedded_chunks[0][1]))
+
+    if embedded_chunks:
+        print(
+            "Embedding Dimension:",
+            len(embedded_chunks[0][1])
+        )
