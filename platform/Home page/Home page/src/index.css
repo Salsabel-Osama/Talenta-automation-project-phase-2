@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-brand: #FA1E71;
+    --color-brand-light: #ff4d94;
+    --color-brand-dark: #cc0052;
+    --color-surface-dim: #1a0110;
+    --color-surface: #2b031d;
+    --color-surface-bright: #350b26;
+    --color-surface-card: #300823;
+  }
+
+  body {
+    background-color: #1a0110;
+    color: #fdf4f8;
+    font-family: 'Hanken Grotesk', 'Plus Jakarta Sans', sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+.glow-text {
+  text-shadow: 0 0 24px rgba(250, 30, 113, 0.55);
+}
+
+.glow-box {
+  box-shadow: 0 0 35px rgba(250, 30, 113, 0.2);
+}
+
+.glass-nav {
+  background: rgba(26, 1, 16, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(250, 30, 113, 0.15);
+}
+
+.ecosystem-card {
+  background: linear-gradient(180deg, #300823 0%, #200416 100%);
+  border: 1px solid rgba(250, 30, 113, 0.12);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.ecosystem-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 35px rgba(250, 30, 113, 0.15);
+  border-color: rgba(250, 30, 113, 0.4);
+}
+
+.hero-wave-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: 
+    radial-gradient(120% 90% at 85% 0%, rgba(255,77,148,0.45) 0%, rgba(250,30,113,0.28) 20%, rgba(122,10,74,0.2) 40%, rgba(26,1,16,0) 65%), 
+    linear-gradient(180deg, #2b031d 0%, #1a0110 60%, #0c0007 100%);
+}
+
+.hex-pattern {
+  position: absolute;
+  top: -10%;
+  left: -5%;
+  width: 45%;
+  height: 60%;
+  opacity: 0.12;
+  background-image: 
+    repeating-linear-gradient(60deg, transparent 0 2px, rgba(255,255,255,0.5) 2px 3px, transparent 3px 40px), 
+    repeating-linear-gradient(-60deg, transparent 0 2px, rgba(255,255,255,0.5) 2px 3px, transparent 3px 40px);
+  -webkit-mask-image: radial-gradient(circle at 20% 20%, black 0%, transparent 70%);
+  mask-image: radial-gradient(circle at 20% 20%, black 0%, transparent 70%);
+  pointer-events: none;
+}
+

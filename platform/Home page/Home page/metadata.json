@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Talenta Partners - Recruitment Intelligence Platform",
+  "description": "Next-generation recruitment intelligence platform combining AI-driven candidate matching with human decision-making for Talenta Partners.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
