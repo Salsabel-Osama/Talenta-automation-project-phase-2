@@ -1,396 +1,644 @@
-from validation import validate_or_raise
-from mcp.server.fastmcp import FastMCP, Context
+from __future__ import annotations
+
 import asyncio
+import os
 import sys
-from db import get_connection
+
+from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import SamplingMessage, TextContent
+from mcp.types import Tool as MCPTool
+
+from db import (
+    get_connection,
+    get_enabled_tool_names,
+    get_or_create_agent,
+    is_tool_enabled_for_agent,
+    sync_agent_tool_catalog,
+)
+from validation import validate_or_raise
 
 
-# Capability negotiation & Transports
-mcp = FastMCP("TalentaRecruitmentServer")
+# ============================================================
+# Agent Identity
+# ============================================================
+#
+# Each connecting agent gets its own MCP server subprocess: see
+# agent/client.py, where stdio_client spawns a fresh
+# "python server.py" per connection. The agent identifies itself
+# through the TALENTA_AGENT_NAME environment variable that the
+# client sets before spawning (falls back to "default" so existing
+# callers that don't set it yet keep working).
+#
+# Every tool below is still registered normally with @mcp.tool();
+# nothing here edits or removes a tool's code at deploy time. What
+# changes per agent is which of those tools are actually exposed,
+# decided live against the agent_tools table so an admin's toggle
+# on the platform reaches this agent on its very next
+# list_tools()/call_tool() call -- no code edit, no redeploy, no
+# server restart required.
+#
+# ============================================================
+
+AGENT_NAME = os.environ.get(
+    "TALENTA_AGENT_NAME",
+    "default",
+)
+
+_agent_id_cache: int | None = None
 
 
-# Resources
-@mcp.resource("talenta://policies/hiring")
-def get_hiring_policies() -> str:
-    """ Talenta's official hiring policies and constraints"""
-
-    return """
-    TALENTA OFFICIAL HIRING POLICIES & EVALUATION RULES:
-
-    1. Experience Constraint: 
-       A candidate MUST NOT be accepted if their `experience_years` (from Candidates table) is strictly less than the job's `min_experience` (from Jobs table). Such applications should be marked as 'REJECTED'.
-
-    2. Education Matching:
-       The candidate's `education` should closely match the job's `required_degree`. If it is completely unrelated, flag the application for manual review ('PENDING').
-
-    3. Match Score Threshold:
-       Applications with a calculated `match_score` (based on overlapping CandidateSkills and JobSkills) below 75.00% cannot be automatically accepted. They must remain 'PENDING' for HR review.
-
-    4. Zero-Tolerance Policy:
-       Any candidate applying for a job in the 'Cybersecurity' department without 'Linux' or 'Networking' skills must be 'REJECTED' immediately.
-
-    5. Human-in-the-Loop Rule:
-       The AI is authorized to automatically reject candidates who violate rules 1 and 4. However, moving an application to 'ACCEPTED' requires explicit confirmation from a logged-in HR Manager.
+def _get_agent_id() -> int:
+    """
+    Resolve (and cache for this process) the agents.agent_id row
+    for AGENT_NAME, creating it on first contact if needed.
     """
 
+    global _agent_id_cache
 
-# Notifications
-hr_logged_in = False
+    if _agent_id_cache is None:
 
+        agent_row = get_or_create_agent(
+            AGENT_NAME,
+            agent_type="mcp_client",
+        )
+
+        _agent_id_cache = agent_row["agent_id"]
+
+    return _agent_id_cache
+
+
+# ============================================================
+# MCP Server
+# ============================================================
+
+class AgentScopedFastMCP(FastMCP):
+    """
+    A FastMCP server whose list_tools() / call_tool() are filtered
+    per connecting agent against the live agent_tools table,
+    instead of unconditionally exposing every @mcp.tool().
+    """
+
+    async def list_tools(self) -> list[MCPTool]:
+
+        all_tools = await super().list_tools()
+
+        agent_id = _get_agent_id()
+
+        # Register any tool the code knows about that this agent
+        # hasn't seen before (defaults to enabled). Idempotent, so
+        # calling this on every list_tools() is safe.
+        sync_agent_tool_catalog(
+            agent_id,
+            [tool.name for tool in all_tools],
+        )
+
+        enabled_names = get_enabled_tool_names(agent_id)
+
+        return [
+            tool
+            for tool in all_tools
+            if tool.name in enabled_names
+        ]
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict,
+    ):
+
+        agent_id = _get_agent_id()
+
+        if not is_tool_enabled_for_agent(agent_id, name):
+
+            raise ToolError(
+                f"Tool '{name}' is disabled for agent "
+                f"'{AGENT_NAME}'. An admin can re-enable it from "
+                f"the platform's tool management panel."
+            )
+
+        return await super().call_tool(name, arguments)
+
+
+mcp = AgentScopedFastMCP(
+    "TalentaRecruitmentServer"
+)
+
+
+# ============================================================
+# Resources
+# ============================================================
+
+@mcp.resource(
+    "talenta://policies/hiring"
+)
+def get_hiring_policies() -> str:
+    """
+    Talenta official hiring policies.
+    """
+
+    return """
+TALENTA OFFICIAL HIRING POLICIES & EVALUATION RULES:
+
+1. Experience Constraint:
+   A candidate MUST NOT be accepted if their
+   experience_years is strictly less than the job's
+   min_experience.
+
+2. Education Matching:
+   Candidate education should closely match the
+   required degree. Completely unrelated education
+   requires manual review.
+
+3. Match Score Threshold:
+   Applications with match_score below 75.00%
+   cannot be automatically accepted.
+
+4. Zero-Tolerance Cybersecurity Policy:
+   Candidates applying for Cybersecurity roles without
+   Linux or Networking skills must be rejected.
+
+5. Human-in-the-Loop:
+   AI may automatically reject candidates violating
+   mandatory rejection rules.
+
+   Moving an application to ACCEPTED requires
+   explicit HR Manager confirmation.
+"""
+
+
+# ============================================================
+# HR Authentication Helper
+# ============================================================
+
+async def require_hr_manager(
+    ctx: Context,
+) -> bool:
+    """
+    Verify that the current MCP session is authenticated
+    as an HR Manager.
+
+    NOTE:
+    The actual session authentication mechanism should be
+    connected to the platform authentication layer.
+
+    This helper intentionally avoids using a global
+    process-wide login flag.
+    """
+
+    session = getattr(
+        ctx,
+        "session",
+        None,
+    )
+
+    if session is None:
+        return False
+
+    # Placeholder until platform authentication is connected.
+    #
+    # The platform should provide authenticated user/session
+    # information here.
+
+    authenticated_user = getattr(
+        session,
+        "user",
+        None,
+    )
+
+    if not authenticated_user:
+        return False
+
+    role = getattr(
+        authenticated_user,
+        "role",
+        None,
+    )
+
+    return role == "HR_MANAGER"
+
+
+# ============================================================
+# HR Login
+# ============================================================
 
 @mcp.tool()
 async def simulate_hr_login(
     username: str,
     role: str,
-    ctx: Context
+    ctx: Context,
 ) -> str:
-    """Simulates an HR Manager logging into the system and unlocks restricted tools."""
+    """
+    Simulate HR Manager authentication.
+
+    The real platform should replace this with proper
+    session authentication.
+    """
 
     validate_or_raise(
         "hr_login",
         {
             "username": username,
-            "role": role
-        }
+            "role": role,
+        },
     )
-
-    global hr_logged_in
-    hr_logged_in = True
-
-    _register_restricted_tools()
-
-    await ctx.session.send_tool_list_changed()
-
-    return f"{username} logged in successfully as {role}. Restricted tools are now available."
-
-
-def _approve_final_hire_impl(
-    application_id: int,
-    approved_by: str,
-    approval_reason: str
-) -> str:
-    """Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only."""
-
-    validate_or_raise(
-        "approve_hire",
-        {
-            "application_id": application_id,
-            "approved_by": approved_by,
-            "approval_reason": approval_reason
-        }
-    )
-
-    if not hr_logged_in:
-        return "Error: This tool requires an active HR Manager session"
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT application_id, status FROM Applications WHERE application_id = ?",
-        (application_id,)
-    )
-
-    row = cursor.fetchone()
-
-    if row is None:
-        conn.close()
-        return f"Error: Application {application_id} does not exist."
-
-    current_status = row["status"]
-
-    if current_status == "REJECTED":
-        conn.close()
-        return (
-            f"Error: Application {application_id} was already REJECTED "
-            "and cannot be hired."
-        )
-
-    if current_status == "ACCEPTED":
-        conn.close()
-        return (
-            f"Application {application_id} is already ACCEPTED. "
-            "No changes made."
-        )
-
-    cursor.execute(
-        """
-        UPDATE Applications
-        SET status = ?
-        WHERE application_id = ?
-        """,
-        ("ACCEPTED", application_id)
-    )
-
-    conn.commit()
-    conn.close()
 
     return (
-        f"Application {application_id} has been officially "
-        "finalized as HIRED."
+        f"{username} logged in successfully "
+        f"as {role}."
     )
 
 
-async def _approve_final_hire_with_confirmation_impl(
+# ============================================================
+# Approve Final Hire
+# ============================================================
+
+@mcp.tool()
+async def approve_final_hire(
     application_id: int,
     approved_by: str,
     approval_reason: str,
-    ctx: Context
+    ctx: Context,
 ) -> str:
-    """Finalizes hiring after explicit HR confirmation (elicitation)."""
+    """
+    Finalize hiring after HR authorization.
+
+    This operation always requires explicit confirmation.
+    """
 
     validate_or_raise(
         "approve_hire",
         {
             "application_id": application_id,
             "approved_by": approved_by,
-            "approval_reason": approval_reason
-        }
+            "approval_reason": approval_reason,
+        },
     )
 
-    if not hr_logged_in:
-        return "Error: This tool requires an active HR Manager session"
+    if not await require_hr_manager(ctx):
+        return (
+            "Error: This tool requires an active "
+            "HR Manager session."
+        )
 
     conn = get_connection()
-    cursor = conn.cursor()
 
-    cursor.execute(
-        "SELECT application_id, status FROM Applications WHERE application_id = ?",
-        (application_id,)
-    )
-    row = cursor.fetchone()
+    try:
 
-    if row is None:
-        conn.close()
-        return f"Error: Application {application_id} does not exist."
+        cursor = conn.cursor()
 
-    current_status = row["status"]
+        cursor.execute(
+            """
+            SELECT
+                application_id,
+                status
+            FROM Applications
+            WHERE application_id = ?
+            """,
+            (application_id,),
+        )
 
-    if current_status == "REJECTED":
-        conn.close()
-        return f"Error: Application {application_id} was already REJECTED and cannot be hired."
+        row = cursor.fetchone()
 
-    if current_status == "ACCEPTED":
-        conn.close()
-        return f"Application {application_id} is already ACCEPTED. No changes made."
+        if row is None:
+            return (
+                f"Error: Application "
+                f"{application_id} does not exist."
+            )
 
-    result = await ctx.session.elicit(
-        message=(
-            f"HR Manager '{approved_by}' wants to approve Application {application_id}.\n\n"
-            f"Reason:\n{approval_reason}\n\n"
-            "Do you confirm this hiring decision?"
-        ),
-        requestedSchema={
-            "type": "object",
-            "properties": {
-                "confirm": {
-                    "type": "boolean",
-                    "description": "Approve or reject the hiring decision."
-                }
+        current_status = row["status"]
+
+        if current_status == "REJECTED":
+            return (
+                f"Error: Application "
+                f"{application_id} was already REJECTED "
+                f"and cannot be hired."
+            )
+
+        if current_status == "ACCEPTED":
+            return (
+                f"Application {application_id} "
+                f"is already ACCEPTED."
+            )
+
+        result = await ctx.session.elicit(
+            message=(
+                f"HR Manager '{approved_by}' wants to "
+                f"approve Application {application_id}.\n\n"
+                f"Reason:\n{approval_reason}\n\n"
+                f"Do you confirm this hiring decision?"
+            ),
+            requestedSchema={
+                "type": "object",
+                "properties": {
+                    "confirm": {
+                        "type": "boolean",
+                    }
+                },
+                "required": [
+                    "confirm"
+                ],
+                "additionalProperties": False,
             },
-            "required": ["confirm"],
-            "additionalProperties": False
-        }
-    )
+        )
 
-    if result.action != "accept" or not result.content.get("confirm"):
+        if (
+            result.action != "accept"
+            or not result.content.get("confirm")
+        ):
+            return (
+                f"Hiring for application "
+                f"{application_id} was cancelled."
+            )
+
+        cursor.execute(
+            """
+            UPDATE Applications
+            SET status = 'ACCEPTED'
+            WHERE application_id = ?
+            """,
+            (application_id,),
+        )
+
+        conn.commit()
+
+        return (
+            f"Application {application_id} "
+            f"has been officially approved "
+            f"by {approved_by}."
+        )
+
+    finally:
+
         conn.close()
-        return f"Hiring for application {application_id} was cancelled by the HR Manager."
-
-    cursor.execute(
-        "UPDATE Applications SET status = ? WHERE application_id = ?",
-        ("ACCEPTED", application_id)
-    )
-    conn.commit()
-    conn.close()
-
-    return f"Application {application_id} has been officially approved by {approved_by}."
 
 
-_restricted_tools_registered = False
+# ============================================================
+# Batch Match
+# ============================================================
 
-
-def _register_restricted_tools():
-    """Registers HR-only tools at runtime. Called only after simulate_hr_login succeeds."""
-    global _restricted_tools_registered
-
-    if _restricted_tools_registered:
-        return
-
-    mcp.add_tool(
-        _approve_final_hire_impl,
-        name="approve_final_hire",
-        description="Finalizes hiring for a candidate. Restricted to HR-authenticated sessions only."
-    )
-
-    mcp.add_tool(
-        _approve_final_hire_with_confirmation_impl,
-        name="approve_final_hire_with_confirmation",
-        description="Finalizes hiring after explicit HR confirmation (human-in-the-loop)."
-    )
-
-    _restricted_tools_registered = True
-
-
-# Progress tracking
 @mcp.tool()
 async def batch_match_candidates(
     job_id: int,
     minimum_match: float,
     include_pending: bool,
-    ctx: Context
+    ctx: Context,
 ) -> str:
-    """Matches applicants against a job's required skills, reporting progress throughout the process."""
+    """
+    Match applications against job skills.
+
+    The calculated score is persisted into
+    Applications.match_score.
+    """
 
     validate_or_raise(
         "batch_match",
         {
             "job_id": job_id,
             "minimum_match": minimum_match,
-            "include_pending": include_pending
-        }
+            "include_pending": include_pending,
+        },
     )
 
     conn = get_connection()
-    cursor = conn.cursor()
 
-    cursor.execute(
-        "SELECT skill FROM JobSkills WHERE job_id = ?",
-        (job_id,)
-    )
+    try:
 
-    required_skills = {r["skill"] for r in cursor.fetchall()}
-
-    if not required_skills:
-        conn.close()
-        return f"Error: No skills found for job_id {job_id}."
-
-    if include_pending:
-        cursor.execute(
-            """
-            SELECT application_id, candidate_id
-            FROM Applications
-            WHERE job_id = ?
-            """,
-            (job_id,)
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT application_id, candidate_id
-            FROM Applications
-            WHERE job_id = ?
-            AND status = 'PENDING'
-            """,
-            (job_id,)
-        )
-
-    applications = cursor.fetchall()
-
-    total = len(applications)
-
-    if total == 0:
-        conn.close()
-        return f"No matching applications found for job {job_id}."
-
-    results = []
-
-    for i, app in enumerate(applications):
+        cursor = conn.cursor()
 
         cursor.execute(
             """
             SELECT skill
-            FROM CandidateSkills
-            WHERE candidate_id = ?
+            FROM JobSkills
+            WHERE job_id = ?
             """,
-            (app["candidate_id"],)
+            (job_id,),
         )
 
-        candidate_skills = {r["skill"] for r in cursor.fetchall()}
+        required_skills = {
+            row["skill"]
+            for row in cursor.fetchall()
+        }
 
-        overlap = candidate_skills & required_skills
-        match_percentage = (len(overlap) / len(required_skills)) * 100
-
-        if match_percentage >= minimum_match:
-            results.append(
-                f"Application {app['application_id']} : {match_percentage:.1f}% match"
+        if not required_skills:
+            return (
+                f"Error: No skills found "
+                f"for job_id {job_id}."
             )
 
-        await ctx.report_progress(
-            progress=((i + 1) / total) * 100,
-            total=100,
-            message=f"Processed application {i + 1} of {total}"
+        if include_pending:
+
+            cursor.execute(
+                """
+                SELECT
+                    application_id,
+                    candidate_id
+                FROM Applications
+                WHERE job_id = ?
+                """,
+                (job_id,),
+            )
+
+        else:
+
+            cursor.execute(
+                """
+                SELECT
+                    application_id,
+                    candidate_id
+                FROM Applications
+                WHERE job_id = ?
+                AND status = 'PENDING'
+                """,
+                (job_id,),
+            )
+
+        applications = cursor.fetchall()
+
+        total = len(applications)
+
+        if total == 0:
+            return (
+                f"No matching applications "
+                f"found for job {job_id}."
+            )
+
+        results = []
+
+        for index, application in enumerate(
+            applications
+        ):
+
+            cursor.execute(
+                """
+                SELECT skill
+                FROM CandidateSkills
+                WHERE candidate_id = ?
+                """,
+                (
+                    application[
+                        "candidate_id"
+                    ],
+                ),
+            )
+
+            candidate_skills = {
+                row["skill"]
+                for row in cursor.fetchall()
+            }
+
+            overlap = (
+                candidate_skills
+                & required_skills
+            )
+
+            match_percentage = (
+                len(overlap)
+                / len(required_skills)
+            ) * 100
+
+            # Persist calculated score
+            cursor.execute(
+                """
+                UPDATE Applications
+                SET match_score = ?
+                WHERE application_id = ?
+                """,
+                (
+                    match_percentage,
+                    application[
+                        "application_id"
+                    ],
+                ),
+            )
+
+            if (
+                match_percentage
+                >= minimum_match
+            ):
+
+                results.append(
+                    f"Application "
+                    f"{application['application_id']} "
+                    f": "
+                    f"{match_percentage:.1f}% match"
+                )
+
+            await ctx.report_progress(
+                progress=(
+                    (index + 1)
+                    / total
+                ) * 100,
+                total=100,
+                message=(
+                    f"Processed application "
+                    f"{index + 1} of {total}"
+                ),
+            )
+
+            await asyncio.sleep(
+                0.1
+            )
+
+        conn.commit()
+
+        return (
+            f"Batch matching completed "
+            f"for Job {job_id}.\n\n"
+            + (
+                "\n".join(results)
+                if results
+                else "No applications met "
+                     "the requested threshold."
+            )
         )
 
-        await asyncio.sleep(0.3)
+    finally:
 
-    conn.close()
-
-    return (
-        f"Batch matching completed for Job {job_id}.\n\n"
-        + "\n".join(results)
-    )
+        conn.close()
 
 
-# Sampling
+# ============================================================
+# Recruiter Note Analysis
+# ============================================================
+
 @mcp.tool()
 async def analyze_recruiter_note(
     application_id: int,
     analysis_type: str,
-    ctx: Context
+    ctx: Context,
 ) -> str:
-    """Analyzes recruiter notes using the client's model."""
+    """
+    Analyze recruiter notes using client sampling.
+    """
 
     validate_or_raise(
         "recruiter_note",
         {
             "application_id": application_id,
-            "analysis_type": analysis_type
-        }
+            "analysis_type": analysis_type,
+        },
     )
 
     conn = get_connection()
-    cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        SELECT recruiter_notes
-        FROM Applications
-        WHERE application_id = ?
-        """,
-        (application_id,)
-    )
+    try:
 
-    row = cursor.fetchone()
+        cursor = conn.cursor()
 
-    if row is None:
+        cursor.execute(
+            """
+            SELECT recruiter_notes
+            FROM Applications
+            WHERE application_id = ?
+            """,
+            (application_id,),
+        )
+
+        row = cursor.fetchone()
+
+        if row is None:
+            return (
+                f"Error: Application "
+                f"{application_id} does not exist."
+            )
+
+        note = row["recruiter_notes"]
+
+    finally:
+
         conn.close()
-        return f"Error: Application {application_id} does not exist."
-
-    note = row["recruiter_notes"]
 
     if not note:
-        conn.close()
-        return f"Application {application_id} has no recruiter notes."
-
-    conn.close()
+        return (
+            f"Application {application_id} "
+            f"has no recruiter notes."
+        )
 
     if analysis_type == "sentiment":
+
         prompt = (
-            f'Classify the sentiment of this recruiter note as exactly one word '
-            f'(POSITIVE, NEGATIVE, or NEUTRAL): "{note}"'
+            "Classify the sentiment of this recruiter "
+            "note as exactly one word "
+            "(POSITIVE, NEGATIVE, or NEUTRAL): "
+            f'"{note}"'
         )
 
     elif analysis_type == "summary":
+
         prompt = (
-            f"Summarize the following recruiter note in one short paragraph:\n\n{note}"
+            "Summarize the following recruiter note "
+            "in one short paragraph:\n\n"
+            f"{note}"
         )
 
-    elif analysis_type == "risk":
+    else:
+
         prompt = (
-            f"Analyze this recruiter note and identify any hiring risks. "
-            f"Respond with a short explanation:\n\n{note}"
+            "Analyze this recruiter note and identify "
+            "any hiring risks. Respond with a short "
+            "explanation:\n\n"
+            f"{note}"
         )
 
     response = await ctx.session.create_message(
@@ -399,73 +647,85 @@ async def analyze_recruiter_note(
                 role="user",
                 content=TextContent(
                     type="text",
-                    text=prompt
-                )
+                    text=prompt,
+                ),
             )
         ],
-        max_tokens=100
+        max_tokens=100,
     )
 
     result = response.content.text.strip()
 
     return (
-        f"Analysis Type: {analysis_type.upper()}\n\n"
-        f"Recruiter Note:\n{note}\n\n"
-        f"Result:\n{result}"
+        f"Analysis Type: "
+        f"{analysis_type.upper()}\n\n"
+        f"Recruiter Note:\n"
+        f"{note}\n\n"
+        f"Result:\n"
+        f"{result}"
     )
 
+
+# ============================================================
+# Prompts
+# ============================================================
 
 @mcp.prompt()
 def draft_interview_invite(
     candidate_name: str,
     job_title: str,
-    interview_date: str
+    interview_date: str,
 ) -> str:
-    """A prompt template for generating an interview invitation email."""
 
     validate_or_raise(
         "interview_prompt",
         {
             "candidate_name": candidate_name,
             "job_title": job_title,
-            "interview_date": interview_date
-        }
+            "interview_date": interview_date,
+        },
     )
 
     return f"""
-        Please draft a professional and welcoming interview invitation email for a candidate named '{candidate_name}'.
+Please draft a professional and welcoming
+interview invitation email for:
 
-        They have been shortlisted for the '{job_title}' position at Talenta Recruitment.
+Candidate: {candidate_name}
+Position: {job_title}
+Interview date: {interview_date}
 
-        Include the following details:
-        1. Congratulate them on passing the initial screening.
-        2. Propose an interview scheduled for {interview_date}.
-        3. Ask them to confirm their availability or suggest an alternative time.
-        4. Mention that the meeting link will be shared after confirmation.
-        5. Maintain a warm, professional, and encouraging tone.
-    """
+Include:
+
+1. Congratulations on passing initial screening.
+2. Interview date.
+3. Request confirmation of availability.
+4. Mention that the meeting link will be shared
+   after confirmation.
+5. Warm and professional tone.
+"""
 
 
 @mcp.prompt()
 def draft_rejection_email(
     candidate_name: str,
-    job_title: str
+    job_title: str,
 ) -> str:
-    """Reusable starting point for drafting a polite rejection email to a candidate."""
 
     validate_or_raise(
         "rejection_prompt",
         {
             "candidate_name": candidate_name,
-            "job_title": job_title
-        }
+            "job_title": job_title,
+        },
     )
 
     return (
-        f"Draft a professional, respectful rejection email to {candidate_name} "
-        f"regarding the {job_title} position at Talenta Recruitment. "
-        f"Thank them for their time, keep the tone warm and encouraging, "
-        f"and invite them to apply for future roles that match their skills."
+        f"Draft a professional and respectful "
+        f"rejection email to {candidate_name} "
+        f"regarding the {job_title} position at "
+        f"Talenta Recruitment. Thank them for their "
+        f"time, keep the tone warm and encouraging, "
+        f"and invite them to apply for future roles."
     )
 
 
@@ -473,37 +733,47 @@ def draft_rejection_email(
 def draft_job_offer(
     candidate_name: str,
     job_title: str,
-    salary: str
+    salary: str,
 ) -> str:
-    """A prompt template for generating a job offer email."""
 
     validate_or_raise(
         "job_offer",
         {
             "candidate_name": candidate_name,
             "job_title": job_title,
-            "salary": salary
-        }
+            "salary": salary,
+        },
     )
 
     return f"""
-        Please draft a formal job offer email for '{candidate_name}' who has been selected for the '{job_title}' role at Talenta Recruitment.
+Please draft a formal job offer email for:
 
-        Include the following key points:
+Candidate: {candidate_name}
+Position: {job_title}
+Starting salary: {salary}
 
-        1. Express our excitement to welcome them to the team.
-        2. State the official job title ({job_title}) and the starting salary ({salary}).
-        3. Mention that an official employment contract with benefits is attached.
-        4. Ask the candidate to review the offer and reply by the end of the week.
-        5. Maintain a professional, welcoming, and enthusiastic tone.
-    """
+Include:
+
+1. Welcome and excitement.
+2. Official position and salary.
+3. Employment contract and benefits.
+4. Request response by the end of the week.
+5. Professional and enthusiastic tone.
+"""
 
 
+# ============================================================
+# Run Server
+# ============================================================
 
-
-
-
-# run server
 if __name__ == "__main__":
-    print("Starting Talenta MCP Server on stdio transport...", file=sys.stderr)
-    mcp.run(transport="stdio")
+
+    print(
+        "Starting Talenta MCP Server "
+        "on stdio transport...",
+        file=sys.stderr,
+    )
+
+    mcp.run(
+        transport="stdio"
+    )
