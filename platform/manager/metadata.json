@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Manager Admin - System Health \u0026 Orchestration",
+  "description": "Enterprise Control \u0026 Live Monitoring Dashboard for Manager Admin Cluster, MCP Agents, Human-in-the-loop Decision Queue, and RAG Sources.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

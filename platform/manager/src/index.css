@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Hanken Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: #240018;
+    color: #ffd8e9;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #240018;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #5c2045;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #FA1E71;
+}
+
+/* Subtle glow effects */
+.glow-pink-sm {
+  box-shadow: 0 0 15px rgba(250, 30, 113, 0.25);
+}
+
+.glow-pink-md {
+  box-shadow: 0 0 25px rgba(250, 30, 113, 0.4);
+}
+
+.glow-pink-border {
+  box-shadow: inset 0 0 12px rgba(250, 30, 113, 0.15), 0 0 15px rgba(250, 30, 113, 0.2);
+}
+
