@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix HR Talent Intelligence Suite",
+  "description": "Enterprise autonomous HR \u0026 recruitment agent platform with multi-agent orchestration, talent sourcing, knowledge RAG, and human-in-the-loop reviews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
