@@ -1,13 +1,12 @@
-from memory.router import (
+from mcp_server.memory.router import (
     PromoteOrDropRouter,
-    ManagedShortTermMemory
+    ManagedShortTermMemory,
 )
 
-from memory.episodic import EpisodicMemory
-from memory.semantic import SemanticMemory
-from memory.consolidation import ConsolidationEngine
-from memory.scratchpad import Scratchpad
-
+from mcp_server.memory.episodic import EpisodicMemory
+from mcp_server.memory.semantic import SemanticMemory
+from mcp_server.memory.consolidation import ConsolidationEngine
+from mcp_server.memory.scratchpad import Scratchpad
 
 def print_title(title):
     print("\n" + "=" * 70)
@@ -159,6 +158,59 @@ def main():
     print_title("SEMANTIC MEMORY")
 
     consolidator.show_semantic_memory()
+
+
+    def test_router_promotes_important_message():
+        episodic = EpisodicMemory()
+
+        router = PromoteOrDropRouter(
+            episodic_memory=episodic
+        )
+
+        stm = ManagedShortTermMemory(
+            router=router,
+            max_turns=1,
+        )
+
+        stm.add(
+            "user",
+            "Candidate Alice has been accepted for the Backend Developer role.",
+        )
+
+        stm.add(
+            "assistant",
+            "Okay.",
+        )
+
+        assert episodic.size() == 1
+
+        logs = router.get_grader_logs()
+
+        assert logs[0]["decision"] == "promote"
+        assert "retention" in logs[0]["reason"].lower()
+
+
+    def test_router_drops_unimportant_message():
+        episodic = EpisodicMemory()
+
+        router = PromoteOrDropRouter(
+            episodic_memory=episodic
+       )
+
+        stm = ManagedShortTermMemory(
+            router=router,
+            max_turns=1,
+        )
+
+        stm.add("assistant", "Okay.")
+
+        stm.add("assistant", "Done.")
+
+        assert episodic.size() == 0
+
+        logs = router.get_grader_logs()
+
+        assert logs[0]["decision"] == "drop"
 
 
 if __name__ == "__main__":
