@@ -174,19 +174,20 @@ export const HumanReviewView: React.FC<HumanReviewViewProps> = ({
                 >
                   <XCircle className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => onApprove(item.id)}
-                  className="p-2 rounded-full border border-green-500/30 text-green-400 hover:bg-green-500/15 transition-colors cursor-pointer"
-                  title="Direct Approve"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => onOpenReview(item)}
-                  className="px-4 py-2 rounded-full bg-[#FA1E71] hover:bg-[#ff2e80] text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
-                >
-                  Inspect & Review
-                </button>
+<button
+  onClick={() => onApprove(item.id)}
+  className="p-2 rounded-full border border-green-500/30 text-green-400 hover:bg-green-500/15 transition-colors cursor-pointer"
+  title="Direct Approve"
+>
+  <CheckCircle2 className="w-4 h-4" />
+</button>
+
+<button
+  onClick={() => onOpenReview(item)}
+  className="px-4 py-2 rounded-full bg-[#FA1E71] hover:bg-[#ff2e80] text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
+>
+  Inspect & Review
+</button>
               </div>
             </div>
           </div>

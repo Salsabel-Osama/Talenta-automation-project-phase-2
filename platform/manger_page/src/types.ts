@@ -1,4 +1,4 @@
-export type NavTab = 'dashboard' | 'agents' | 'knowledge' | 'human-review' | 'failure-tickets';
+export type NavTab = 'dashboard' | 'agents' | 'knowledge' | 'human-review' | 'failure-tickets'| 'run-recovery';
 
 export interface MCPAgent {
   id: string;

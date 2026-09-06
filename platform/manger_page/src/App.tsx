@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { RunRecoveryView } from './components/RunRecoveryView';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { AgentsView } from './components/AgentsView';
@@ -242,6 +243,10 @@ export default function App() {
               onResume={handleResumeFailure}
             />
           )}
+          {activeTab === 'run-recovery' && (
+  <RunRecoveryView />
+)}
+          
         </div>
 
         {/* Subtle Footer */}

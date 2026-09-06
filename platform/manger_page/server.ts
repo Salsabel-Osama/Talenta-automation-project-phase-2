@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
@@ -7,6 +8,37 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const CHECKPOINT_FILE = path.join(process.cwd(), 'checkpoint.json');
+
+interface RunCheckpoint {
+  runId: string;
+  currentNode: string;
+  step: number;
+  status: 'running' | 'paused' | 'completed';
+  updatedAt: string;
+}
+
+function saveCheckpoint(checkpoint: RunCheckpoint) {
+  fs.writeFileSync(
+    CHECKPOINT_FILE,
+    JSON.stringify(checkpoint, null, 2),
+    'utf-8'
+  );
+}
+
+function loadCheckpoint(): RunCheckpoint | null {
+  if (!fs.existsSync(CHECKPOINT_FILE)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(
+      fs.readFileSync(CHECKPOINT_FILE, 'utf-8')
+    );
+  } catch {
+    return null;
+  }
+}
 
 // In-memory cluster state
 let clusterAgents = [
@@ -314,8 +346,22 @@ function getGeminiClient(): GoogleGenAI | null {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 3002;
+  const checkpoint = loadCheckpoint();
 
+  if (checkpoint) {
+    console.log('');
+    console.log('======================================');
+    console.log('CHECKPOINT RECOVERY');
+    console.log('======================================');
+    console.log(`Run ID: ${checkpoint.runId}`);
+    console.log(`Last Node: ${checkpoint.currentNode}`);
+    console.log(`Step: ${checkpoint.step}`);
+    console.log(`Status: ${checkpoint.status}`);
+    console.log('Resuming from checkpoint...');
+    console.log('======================================');
+    console.log('');
+  }
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
@@ -378,6 +424,32 @@ async function startServer() {
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
     res.json(agent);
   });
+
+
+  app.get('/api/run/checkpoint', (req, res) => {
+  try {
+    const checkpointPath = path.join(process.cwd(), 'checkpoint.json');
+
+    if (!fs.existsSync(checkpointPath)) {
+      return res.status(404).json({
+        error: 'No checkpoint found'
+      });
+    }
+
+    const checkpoint = JSON.parse(
+      fs.readFileSync(checkpointPath, 'utf-8')
+    );
+
+    res.json(checkpoint);
+
+  } catch (err: any) {
+    res.status(500).json({
+      error: err.message
+    });
+  }
+});
+
+
 
   app.post('/api/agents/:id/sync', (req, res) => {
     const agent = clusterAgents.find(a => a.id === req.params.id);
@@ -463,7 +535,80 @@ User Input: "${inputPrompt}"`
       });
     }
   });
+  // ==========================================
+  // CHECKPOINT / RECOVERY DEMO
+  // ==========================================
 
+  app.post('/api/run/start', (req, res) => {
+    const runId = `RUN-${Date.now()}`;
+
+    const checkpoint: RunCheckpoint = {
+      runId,
+      currentNode: 'Candidate_Sourcing',
+      step: 1,
+      status: 'running',
+      updatedAt: new Date().toISOString()
+    };
+
+    saveCheckpoint(checkpoint);
+
+    res.json({
+      success: true,
+      message: 'Run started and checkpoint saved.',
+      checkpoint
+    });
+  });
+
+  app.post('/api/run/checkpoint', (req, res) => {
+    const { runId, currentNode, step } = req.body;
+
+    if (!runId || !currentNode || step === undefined) {
+      return res.status(400).json({
+        error: 'runId, currentNode and step are required'
+      });
+    }
+
+    const checkpoint: RunCheckpoint = {
+      runId,
+      currentNode,
+      step,
+      status: 'running',
+      updatedAt: new Date().toISOString()
+    };
+
+    saveCheckpoint(checkpoint);
+
+    res.json({
+      success: true,
+      message: 'Checkpoint saved.',
+      checkpoint
+    });
+  });
+
+
+  app.post('/api/run/complete', (req, res) => {
+    const checkpoint = loadCheckpoint();
+
+    if (!checkpoint) {
+      return res.status(404).json({
+        error: 'No checkpoint found'
+      });
+    }
+
+    const completed = {
+      ...checkpoint,
+      status: 'completed' as const,
+      updatedAt: new Date().toISOString()
+    };
+
+    saveCheckpoint(completed);
+
+    res.json({
+      success: true,
+      message: 'Run completed from recovered checkpoint.',
+      checkpoint: completed
+    });
+  });
   // 4. Critical Failure Tickets
   app.get('/api/failures', (req, res) => {
     res.json(clusterFailures);
@@ -655,6 +800,79 @@ User Input: "${inputPrompt}"`
       });
     }
   });
+
+
+app.post('/api/run/kill', (req, res) => {
+  try {
+    const checkpointPath = path.join(process.cwd(), 'checkpoint.json');
+
+    if (!fs.existsSync(checkpointPath)) {
+      return res.status(404).json({
+        error: 'No active run'
+      });
+    }
+
+    const checkpoint = JSON.parse(
+      fs.readFileSync(checkpointPath, 'utf-8')
+    );
+
+    checkpoint.status = 'killed';
+    checkpoint.updatedAt = new Date().toISOString();
+
+    fs.writeFileSync(
+      checkpointPath,
+      JSON.stringify(checkpoint, null, 2)
+    );
+
+    res.json({
+      success: true,
+      message: 'Process killed. Checkpoint preserved.',
+      checkpoint
+    });
+
+  } catch (err: any) {
+    res.status(500).json({
+      error: err.message
+    });
+  }
+});
+
+app.post('/api/run/restart', (req, res) => {
+  try {
+    const checkpointPath = path.join(process.cwd(), 'checkpoint.json');
+
+    if (!fs.existsSync(checkpointPath)) {
+      return res.status(404).json({
+        error: 'No checkpoint available for recovery'
+      });
+    }
+
+    const checkpoint = JSON.parse(
+      fs.readFileSync(checkpointPath, 'utf-8')
+    );
+
+    checkpoint.status = 'recovered';
+    checkpoint.updatedAt = new Date().toISOString();
+
+    fs.writeFileSync(
+      checkpointPath,
+      JSON.stringify(checkpoint, null, 2)
+    );
+
+    res.json({
+      success: true,
+      message: `Run ${checkpoint.runId} recovered from ${checkpoint.currentNode}.`,
+      checkpoint
+    });
+
+  } catch (err: any) {
+    res.status(500).json({
+      error: err.message
+    });
+  }
+});   
+
+
 
   // ==========================================
   // VITE MIDDLEWARE & STATIC ASSETS

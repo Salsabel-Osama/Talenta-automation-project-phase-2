@@ -8,7 +8,8 @@ import {
   Plus, 
   LogOut, 
   Sparkles,
-  Layers
+  Layers,
+  RotateCw
 } from 'lucide-react';
 import { NavTab } from '../types';
 import { HRLogo } from './HRLogo';
@@ -57,6 +58,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Ticket,
       badge: failureCount > 0 ? failureCount : undefined,
     },
+    {
+  id: 'run-recovery' as NavTab,
+  label: 'Run Recovery',
+  icon: RotateCw,
+},
   ];
 
   return (
